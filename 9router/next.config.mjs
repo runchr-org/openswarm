@@ -16,8 +16,27 @@ const nextConfig = {
         path: false,
       };
     }
-    // Stop watching logs directory to prevent HMR during streaming
-    config.watchOptions = { ...config.watchOptions, ignored: /[\\/](logs|\.next)[\\/]/ };
+    // Stop watching logs directory to prevent HMR during streaming.
+    // Also ignore Windows XP-era junction points in user profile that loop
+    // back on themselves and cause `EPERM: operation not permitted, scandir`
+    // on GitHub Actions runners (cascades into FlightClientEntryPlugin
+    // crash). Local Windows users with normal accounts don't hit this.
+    config.watchOptions = {
+      ...config.watchOptions,
+      ignored: [
+        /[\\/](logs|\.next)[\\/]/,
+        '**/Application Data/**',
+        '**/Local Settings/**',
+        '**/AppData/Local/Application Data/**',
+      ],
+    };
+    // Disable webpack's user-profile + node_modules snapshotting that
+    // triggers the same EPERM scan during `next build` on CI Windows.
+    config.snapshot = {
+      ...(config.snapshot || {}),
+      managedPaths: [],
+      immutablePaths: [],
+    };
     return config;
   },
   async rewrites() {

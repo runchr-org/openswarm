@@ -367,9 +367,19 @@ rsync -a \
     --exclude='__pycache__' --exclude='**/__pycache__' \
     --exclude='*.pyc' --exclude='.venv' \
     --exclude='data/tools' \
+    --exclude='data/outputs_workspace' \
+    --exclude='data/agent_history' --exclude='data/sessions' \
+    --exclude='apps/outputs/webapp_template_cache' \
     --exclude='tests' --exclude='**/tests' \
     --exclude='/.env' --exclude='/.env.*' \
     "$PROJECT_ROOT/backend/" "$STAGING_DIR/backend/"
+# webapp_template_cache: a pre-built node_modules.tar.gz that gets shipped
+# to speed up first-app-create. Apple notarization extracts it and rejects
+# the build because upstream native binaries inside (esbuild, fsevents, etc.)
+# aren't signed with our Developer ID. Backend's _try_extract_bundled_archive
+# in view_builder_templates.py falls through cleanly when the archive is
+# missing, so first-app create just runs `npm install` (about 90s extra).
+# Long-term fix: sign native binaries before tarring in build-template-archive.sh.
 # Note: .env exclude is anchored to the backend/ source root (`/.env` /
 # `/.env.*`), not recursive. The vendored webapp-template snapshot at
 # backend/apps/outputs/webapp_template/.env.example MUST be shipped so
@@ -423,6 +433,13 @@ echo ""
 echo "[5/5] Packaging with electron-builder..."
 cd "$PROJECT_ROOT/electron"
 npm install
+
+# Node's default ~4 GB heap OOMs while codesign'ing the .app on dual-arch
+# publish runs (the .app is ~4.8 GB and electron-builder walks every file
+# to hash + sign, holding paths + metadata in memory). Bump the old-space
+# ceiling so V8 has headroom; 12 GB covers both arches in one invocation.
+# Caller's NODE_OPTIONS is respected if already set.
+export NODE_OPTIONS="${NODE_OPTIONS:---max-old-space-size=12288}"
 
 if $PUBLISH_MODE; then
     npx electron-builder --mac --arm64 --x64 --publish always

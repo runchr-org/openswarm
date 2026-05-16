@@ -1,5 +1,6 @@
 import React, { useEffect, useRef } from 'react';
 import { useStreamingMessage } from '@/shared/state/streamingSlice';
+import { useTypewriter } from '@/shared/useTypewriter';
 import MessageBubble from './MessageBubble';
 import ToolCallBubble from './ToolCallBubble';
 
@@ -25,6 +26,11 @@ interface Props {
 // local and cheap.
 const StreamingBubble: React.FC<Props> = ({ sessionId, activeBranchId, turnLabel, onStreamGrew }) => {
   const streamingMessage = useStreamingMessage(sessionId);
+  // Typewriter pacing: smooths bursty upstream output into a steady
+  // character-by-character reveal with tiny pauses after punctuation.
+  // The full text always lives in Redux (so resume/replay still works);
+  // this only controls how fast it APPEARS to the user.
+  const typedContent = useTypewriter(streamingMessage?.content ?? '');
   // Fire onStreamGrew once per render (i.e. per delta) on a RAF so the
   // host can scroll if it wants to. RAF coalesces multiple deltas in
   // the same frame into one host call. The ref-callback keeps the
@@ -59,7 +65,11 @@ const StreamingBubble: React.FC<Props> = ({ sessionId, activeBranchId, turnLabel
         call={{
           id: streamingMessage.id,
           role: 'tool_call',
-          content: { tool: streamingMessage.tool_name || '', input: streamingMessage.content },
+          // typedContent feeds the SAME typewriter through tool-call
+          // arguments so the args reveal at the same RPG rhythm the
+          // user sees in regular messages, rather than slamming in
+          // whenever the server bursts.
+          content: { tool: streamingMessage.tool_name || '', input: typedContent },
           timestamp: new Date().toISOString(),
           branch_id: activeBranchId,
           parent_id: null,
@@ -76,7 +86,7 @@ const StreamingBubble: React.FC<Props> = ({ sessionId, activeBranchId, turnLabel
       message={{
         id: streamingMessage.id,
         role: streamingMessage.role,
-        content: streamingMessage.content,
+        content: typedContent,
         timestamp: new Date().toISOString(),
         branch_id: activeBranchId,
         parent_id: null,

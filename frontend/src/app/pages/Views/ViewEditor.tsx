@@ -1035,7 +1035,7 @@ const ViewEditor: React.FC<Props> = ({ output }) => {
 
   // Called by ViewPreview when its iframe (or webview) fires the `load`
   // event for a real serveUrl. We delay flipping the painted flag by
-  // 300 ms — the `load` event fires when the HTML doc has loaded but
+  // 300 ms, the `load` event fires when the HTML doc has loaded but
   // SPA bundles (React/Vue/etc) need a beat to mount and paint, so an
   // immediate flip would re-introduce the grey flash we're trying to
   // kill.
@@ -1043,6 +1043,28 @@ const ViewEditor: React.FC<Props> = ({ output }) => {
     const t = window.setTimeout(() => setIframePainted(true), 300);
     return () => window.clearTimeout(t);
   }, []);
+
+  // Placeholder lifecycle. Keep the InstallPlaceholder mounted across
+  // transient gate flips (runtime WS reporting is_new_mode:true with
+  // a still-null frontend_url, then null→URL a beat later) so the
+  // PixelBlast canvas keeps rendering continuously. If we let React
+  // unmount the placeholder Box each time the gate flips false, the
+  // GL context is rebuilt on the next flip and the user reads the
+  // fresh canvas as the animation restarting from t=0 (even though
+  // PIXEL_BLAST_EPOCH keeps uTime mathematically continuous, the
+  // user can't perceive that without a reference frame). Always
+  // fade via opacity, then unmount only after the 400 ms fade-out
+  // has actually completed.
+  const placeholderVisible = showInstallPlaceholder || !iframePainted;
+  const [placeholderMounted, setPlaceholderMounted] = useState(placeholderVisible);
+  useEffect(() => {
+    if (placeholderVisible) {
+      setPlaceholderMounted(true);
+      return undefined;
+    }
+    const t = window.setTimeout(() => setPlaceholderMounted(false), 400);
+    return () => window.clearTimeout(t);
+  }, [placeholderVisible]);
 
   // VSCode-style default `files.exclude`: hide build/install noise from
   // the file tree by default. With the symlinked node_modules + vite's
@@ -1415,17 +1437,19 @@ const ViewEditor: React.FC<Props> = ({ output }) => {
               )}
               {/* Overlay placeholder until the iframe has painted +
                   a 300 ms grace for the SPA's first React commit.
-                  Fades out instead of unmount-snap so the transition
-                  is smooth and the user never sees a flash. */}
-              {(showInstallPlaceholder || !iframePainted) && (
+                  Stays mounted across transient gate flips (see
+                  placeholderMounted lifecycle above) so the
+                  PixelBlast canvas keeps running continuously;
+                  fades in and out via opacity, never via mount. */}
+              {placeholderMounted && (
                 <Box
                   sx={{
                     position: 'absolute',
                     inset: 0,
                     zIndex: 5,
-                    opacity: showInstallPlaceholder || !iframePainted ? 1 : 0,
+                    opacity: placeholderVisible ? 1 : 0,
                     transition: 'opacity 400ms ease',
-                    pointerEvents: iframePainted ? 'none' : 'auto',
+                    pointerEvents: placeholderVisible ? 'auto' : 'none',
                   }}
                 >
                   <InstallPlaceholder />

@@ -244,13 +244,58 @@ const ViewPreview = forwardRef<ViewPreviewHandle, Props>(({
   // Webviews don't surface a React-style `onLoad` prop; subscribe to the
   // Electron-specific `did-finish-load` event to clear the restoring
   // overlay after the about:blank→iframeSrc transition completes.
+  //
+  // Also subscribe to `did-fail-load` and retry. When the runtime WS
+  // reports a frontend_url before Vite has actually bound to its
+  // port, the first navigation hits ERR_CONNECTION_REFUSED and only
+  // did-fail-load fires (never did-finish-load), which would leave
+  // the parent's cold-start placeholder stuck on forever. The retry
+  // re-issues the navigation with exponential backoff (500 ms → 5 s)
+  // until Vite is actually serving, at which point did-finish-load
+  // fires and the overlay can fade cleanly.
   useEffect(() => {
     if (!useWebview) return;
     const wv = webviewRef.current;
     if (!wv) return;
-    wv.addEventListener?.('did-finish-load', handleNavigationLoad);
+
+    let retryTimer: number | null = null;
+    let retryDelay = 500;
+    const MAX_DELAY = 5000;
+    const cancelRetry = () => {
+      if (retryTimer != null) {
+        window.clearTimeout(retryTimer);
+        retryTimer = null;
+      }
+    };
+
+    const onFinish = () => {
+      retryDelay = 500;
+      cancelRetry();
+      handleNavigationLoad();
+    };
+    const onFail = (e: any) => {
+      // Sub-resource failures inside the embedded app (a missing
+      // favicon, a 404 image) also fire did-fail-load, so guard on
+      // isMainFrame. User-initiated aborts (ERR_ABORTED = -3) also
+      // surface here and shouldn't trigger a retry loop.
+      if (e && e.isMainFrame === false) return;
+      if (e && e.errorCode === -3) return;
+      if (retryTimer != null) return;
+      retryTimer = window.setTimeout(() => {
+        retryTimer = null;
+        try { wv.reload?.(); } catch (_) {}
+        retryDelay = Math.min(retryDelay * 2, MAX_DELAY);
+      }, retryDelay);
+    };
+
+    wv.addEventListener?.('did-finish-load', onFinish);
+    wv.addEventListener?.('did-fail-load', onFail);
     return () => {
-      try { wv.removeEventListener?.('did-finish-load', handleNavigationLoad); } catch (_e) {}
+      cancelRetry();
+      try {
+        wv.removeEventListener?.('did-finish-load', onFinish);
+        wv.removeEventListener?.('did-fail-load', onFail);
+      } catch (_e) {}
     };
   }, [useWebview, handleNavigationLoad]);
 

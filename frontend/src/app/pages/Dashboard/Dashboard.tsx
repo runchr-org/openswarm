@@ -1778,7 +1778,6 @@ const DashboardInner: React.FC<DashboardProps> = ({ dashboardId, isActive = true
         onMouseMove={handleViewportMouseMove}
         onMouseUp={handleViewportMouseUp}
         onDoubleClick={handleViewportDoubleClick}
-        onContextMenu={(e) => e.preventDefault()}
         sx={{
           position: 'absolute',
           inset: 0,

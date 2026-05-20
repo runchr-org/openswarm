@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useMemo, useState, useCallback } from 'react';
-import { useParams } from 'react-router-dom';
+import { useNavigate, useParams } from 'react-router-dom';
 import Box from '@mui/material/Box';
 import Typography from '@mui/material/Typography';
 import Chip from '@mui/material/Chip';
@@ -37,6 +37,7 @@ import {
   fetchSession,
   AgentMessage,
   clearSessionMessages,
+  clearMcpSuggestions,
 } from '@/shared/state/agentsSlice';
 import { fetchModes } from '@/shared/state/modesSlice';
 import { createSessionWs } from '@/shared/ws/WebSocketManager';
@@ -167,6 +168,7 @@ const AgentChat: React.FC<AgentChatProps> = ({ sessionId: sessionIdProp, onClose
   };
   const { id: routeId } = useParams<{ id: string }>();
   const id = sessionIdProp || routeId;
+  const navigate = useNavigate();
   const dispatch = useAppDispatch();
   const session = useAppSelector((state) => (id ? state.agents.sessions[id] : undefined));
   const modesMap = useAppSelector((state) => state.modes.items);
@@ -1015,8 +1017,32 @@ const AgentChat: React.FC<AgentChatProps> = ({ sessionId: sessionIdProp, onClose
                 borderRadius: 1.5,
                 border: `1px solid ${c.border.medium}`,
                 bgcolor: c.bg.secondary,
+                position: 'relative',
               }}>
-                <Typography variant="body2" sx={{ color: c.text.primary, fontWeight: 500, mb: 0.5 }}>
+                <Box
+                  role="button"
+                  aria-label="Dismiss integration suggestion"
+                  onClick={() => id && dispatch(clearMcpSuggestions({ sessionId: id }))}
+                  sx={{
+                    position: 'absolute',
+                    top: 6,
+                    right: 8,
+                    width: 20,
+                    height: 20,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    fontSize: '1rem',
+                    lineHeight: 1,
+                    color: c.text.muted,
+                    cursor: 'pointer',
+                    borderRadius: 0.75,
+                    '&:hover': { color: c.text.primary, bgcolor: c.bg.elevated },
+                  }}
+                >
+                  ×
+                </Box>
+                <Typography variant="body2" sx={{ color: c.text.primary, fontWeight: 500, mb: 0.5, pr: 3 }}>
                   Looks like this might need an integration
                 </Typography>
                 <Typography variant="caption" sx={{ color: c.text.secondary, display: 'block', mb: 1 }}>
@@ -1056,8 +1082,18 @@ const AgentChat: React.FC<AgentChatProps> = ({ sessionId: sessionIdProp, onClose
                                 parent_session_id: session.id,
                               }),
                             });
+                            const body = await r.json().catch(() => ({} as any));
                             if (!r.ok) {
                               setActivateError(`Activation failed (${r.status})`);
+                            } else if (body?.status === 'unknown_server') {
+                              // Not yet connected; jump straight to Actions
+                              // so the user can finish OAuth. Nothing here
+                              // can do it on their behalf.
+                              navigate('/actions');
+                            } else if (id) {
+                              // Activation succeeded; clear the banner so the user
+                              // gets visual confirmation the click did something.
+                              dispatch(clearMcpSuggestions({ sessionId: id }));
                             }
                           } catch (e: any) {
                             setActivateError(e?.message || 'Activation failed');

@@ -648,6 +648,30 @@ def _custom_provider_slug(name: str) -> str:
     return s or "custom"
 
 
+def normalize_openai_compat_base_url(url: str) -> str:
+    """Append `/v1` when the user supplied a host without an API path.
+
+    9Router forwards openai-compatible nodes to `<baseUrl>/chat/completions`
+    verbatim. Ollama, LM Studio, llama.cpp, vLLM, and every other OpenAI-
+    compatible server exposes the API under `/v1`, so a user pasting
+    `http://host:11434` (which is what Ollama prints on launch) ends up
+    routed to `/chat/completions` and 404s. Path-bearing URLs are left
+    alone, so `https://api.together.xyz/v1`, `https://openrouter.ai/api/v1`,
+    or anything custom is untouched.
+    """
+    from urllib.parse import urlparse
+    s = (url or "").strip().rstrip("/")
+    if not s:
+        return s
+    try:
+        path = urlparse(s).path
+    except Exception:
+        return s
+    if not path:
+        return s + "/v1"
+    return s
+
+
 async def sync_custom_providers(providers: list) -> None:
     """Mirror settings.custom_providers into 9Router as openai-compatible nodes.
 
@@ -696,7 +720,7 @@ async def sync_custom_providers(providers: list) -> None:
             "name": managed_name,
             "prefix": prefix,
             "apiType": "chat",
-            "baseUrl": base_url.strip(),
+            "baseUrl": normalize_openai_compat_base_url(base_url),
             "type": "openai-compatible",
         }
         try:

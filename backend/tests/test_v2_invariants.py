@@ -1496,6 +1496,33 @@ def test_sync_custom_providers_creates_node_and_connection_for_new_provider():
     assert conn_post[2]["apiKey"] == "key1"
 
 
+def test_sync_custom_providers_appends_v1_when_baseurl_has_no_path():
+    """Ollama prints `http://host:11434` on launch, so users paste it verbatim.
+    Without /v1 the upstream route is `/chat/completions` (404). Sync must
+    normalize bare-host URLs to `<host>/v1` so requests land on
+    `/v1/chat/completions`. URLs that already have a path are left alone."""
+    import asyncio
+    from unittest.mock import patch as upatch
+    from backend.apps.nine_router import sync_custom_providers
+    from backend.apps.settings.models import CustomProvider
+
+    MockClient, state = _make_mock_9router()
+    with upatch("backend.apps.nine_router.is_running", return_value=True), \
+         upatch("backend.apps.nine_router.httpx.AsyncClient", MockClient), \
+         upatch("backend.apps.nine_router.get_providers", new=lambda: _async_return([])):
+        asyncio.run(sync_custom_providers([
+            CustomProvider(name="Local Ollama", base_url="http://10.0.0.5:11434",
+                           api_key="", models=[]),
+            CustomProvider(name="Together", base_url="https://api.together.xyz/v1",
+                           api_key="k", models=[]),
+        ]))
+
+    posts = [c for c in state["calls"] if c[0] == "POST" and "/provider-nodes" in c[1]]
+    by_prefix = {p[2]["prefix"]: p[2] for p in posts}
+    assert by_prefix["cp-local-ollama"]["baseUrl"] == "http://10.0.0.5:11434/v1"
+    assert by_prefix["cp-together"]["baseUrl"] == "https://api.together.xyz/v1"
+
+
 def test_sync_custom_providers_updates_existing_node_in_place():
     """Idempotency: a second sync of the same provider should PUT the
     existing node, not POST a duplicate."""

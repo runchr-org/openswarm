@@ -2235,7 +2235,8 @@ class AgentManager:
                     # CLI can issue requests. Servers that DO check auth always
                     # have a real key configured.
                     env["OPENAI_API_KEY"] = (cp.api_key or "").strip() or "no-auth-required"
-                    env["OPENAI_BASE_URL"] = (cp.base_url or "")
+                    from backend.apps.nine_router import normalize_openai_compat_base_url as _norm_cp_url
+                    env["OPENAI_BASE_URL"] = _norm_cp_url(cp.base_url or "")
                 # Pin subagent ids — without these, CLI's default Haiku 4.5
                 # gets sent to the custom provider and 404s.
                 if global_settings.anthropic_api_key:

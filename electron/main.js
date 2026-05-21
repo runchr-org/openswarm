@@ -721,6 +721,8 @@ function setupAutoUpdater() {
   autoUpdater.autoInstallOnAppQuit = true;
   // Renderer pushes the user's experimental-updates setting via IPC right after settings load.
   autoUpdater.allowPrerelease = false;
+  // Lets us un-ship a bad release: re-flip GH 'latest' to an older one and users hop back to it.
+  autoUpdater.allowDowngrade = true;
 
   autoUpdater.on('update-available', (info) => {
     console.log(`Update available: ${info.version}`);

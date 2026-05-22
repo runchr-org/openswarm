@@ -296,6 +296,19 @@ const AgentCard: React.FC<Props> = ({
   const hasApiKey = !!useAppSelector((s) => s.settings.data.anthropic_api_key);
   const modelsByProvider = useAppSelector((s) => s.models.byProvider);
   const expandedSessionIds = useAppSelector((s) => s.agents.expandedSessionIds);
+  // If this session is a workflow's runner (executor.execute spawned it),
+  // hide the "Make workflow" button per user note on Image #44; the chat
+  // is already inside a workflow loop, converting it back into a fresh
+  // workflow would be a confusing identity collapse.
+  const workflowRunsMap = useAppSelector((s) => s.workflows.runs);
+  const isWorkflowRunnerSession = useMemo(() => {
+    for (const arr of Object.values(workflowRunsMap || {})) {
+      for (const r of arr || []) {
+        if (r.session_id === session.id) return true;
+      }
+    }
+    return false;
+  }, [workflowRunsMap, session.id]);
   // Curated picker label with a tidy fallback for unknowns.
   const friendlyModelLabel = useMemo(() => {
     const value = session.model;
@@ -924,7 +937,7 @@ const AgentCard: React.FC<Props> = ({
             onPointerDown={(e) => e.stopPropagation()}
             sx={{ display: 'flex', alignItems: 'center', gap: 0.5, flexShrink: 0, ml: 0.5 }}
           >
-            {(session.status === 'completed' || session.status === 'stopped') && session.messages.length >= 2 && (
+            {(session.status === 'completed' || session.status === 'stopped') && session.messages.length >= 2 && !isWorkflowRunnerSession && (
               <Tooltip title="Turn this chat into a reusable, schedulable workflow">
                 <Box
                   role="button"

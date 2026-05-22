@@ -503,6 +503,62 @@ async def propose_edit(workflow_id: str, body: dict):
     return out
 
 
+@workflows.router.post("/{workflow_id}/test-run")
+async def test_run_workflow(workflow_id: str, body: dict):
+    """Spawn a Test Agent session running the (possibly-unsaved) draft.
+
+    Powers Image #39: EditAgentView's Test button. Takes an optional
+    draft `steps` array overriding the saved workflow's steps so the
+    user can validate edits before persisting. The spawned session is
+    a normal agent session; nothing is recorded as a WorkflowRun so
+    History stays clean. Returns the new session id; the FE wires it
+    to the workflow card via setCardSidecar(kind='testing') and the
+    dashboard draws the labeled arrow chip between the two cards.
+    """
+    wf = storage.get_workflow(workflow_id)
+    if not wf:
+        raise HTTPException(status_code=404, detail="Workflow not found")
+    draft_steps = (body or {}).get("steps")
+    steps_texts: list[str]
+    if isinstance(draft_steps, list) and draft_steps:
+        steps_texts = [str(s.get("text") or "") for s in draft_steps if isinstance(s, dict) and s.get("text")]
+    else:
+        steps_texts = [s.text for s in wf.steps if s.text and s.text.strip()]
+    if not steps_texts:
+        raise HTTPException(status_code=400, detail="Workflow has no steps to test")
+
+    from backend.apps.agents.models import AgentConfig
+    from backend.apps.agents.agent_manager import agent_manager
+    from backend.apps.workflows import executor
+
+    config = AgentConfig(
+        name=f"{wf.title or 'Workflow'} (test)",
+        model=wf.model or "sonnet",
+        mode=wf.mode or "agent",
+        provider=wf.provider or "anthropic",
+        system_prompt=executor._resolve_system_prompt(wf),
+        allowed_tools=executor._resolve_allowed_tools(wf) or [
+            "Read", "Edit", "Write", "Bash", "Glob", "Grep", "AskUserQuestion",
+        ],
+        dashboard_id=wf.dashboard_id,
+    )
+    session = await agent_manager.launch_agent(config)
+
+    async def _drive_test() -> None:
+        try:
+            for step in steps_texts:
+                await agent_manager.send_message(session.id, step)
+                await executor._await_session_idle(session.id)
+                sess_state = agent_manager.sessions.get(session.id)
+                if sess_state is not None and getattr(sess_state, "status", None) == "error":
+                    return
+        except Exception:
+            logger.exception("test-run drive loop failed")
+    asyncio.create_task(_drive_test())
+
+    return {"session_id": session.id}
+
+
 @workflows.router.post("/{workflow_id}/parse-schedule")
 async def parse_schedule(workflow_id: str, body: dict):
     """Aux-LLM-parse natural language into a ScheduleConfig.

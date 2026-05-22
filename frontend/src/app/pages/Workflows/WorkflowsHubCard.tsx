@@ -480,7 +480,7 @@ const WorkflowsHubCard: React.FC<Props> = ({
         <MenuItem onClick={() => {
           if (!sidebarCtxMenu) return;
           dispatch(addWorkflowCard({ workflowId: sidebarCtxMenu.workflow.id }));
-          dispatch(openWorkflowCard({ workflowId: sidebarCtxMenu.workflow.id, view: 'edit', editFacet: 'Schedule' }));
+          dispatch(openWorkflowCard({ workflowId: sidebarCtxMenu.workflow.id, view: 'edit_agent' }));
           closeSidebarCtxMenu();
         }}>Edit…</MenuItem>
         <MenuItem

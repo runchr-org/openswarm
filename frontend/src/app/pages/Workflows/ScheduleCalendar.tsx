@@ -50,7 +50,9 @@ export default function ScheduleCalendar({ view, density, onSelectWorkflow, refD
   const onEdit = () => {
     if (!ctxMenu) return;
     dispatch(addWorkflowCard({ workflowId: ctxMenu.workflow.id }));
-    dispatch(openWorkflowCard({ workflowId: ctxMenu.workflow.id, view: 'edit', editFacet: 'Schedule' }));
+    // Right-click "Edit" on a calendar entry opens the new Edit Agent
+    // chat view, matching the post-revamp design (Image #38).
+    dispatch(openWorkflowCard({ workflowId: ctxMenu.workflow.id, view: 'edit_agent' }));
     closeMenu();
   };
   const onDelete = () => {

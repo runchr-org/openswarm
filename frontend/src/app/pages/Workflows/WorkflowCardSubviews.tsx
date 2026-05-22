@@ -153,7 +153,10 @@ export function PreviewView({ workflowId, steps, sourceSessionId, initialDraft, 
       const wf = (result as unknown as { payload: Workflow }).payload;
       if (wf?.id) {
         onSaved(wf);
-        dispatch(updateWorkflowCard({ workflowId: wf.id, patch: { view: 'edit', editFacet: 'Schedule' } }));
+        // Route to the new SchedulingView (Image #49), not the legacy
+        // facet editor. The old `view: 'edit', editFacet: 'Schedule'`
+        // path opens a different design entirely.
+        dispatch(updateWorkflowCard({ workflowId: wf.id, patch: { view: 'scheduling' } }));
       }
     } finally {
       setBusy(false);

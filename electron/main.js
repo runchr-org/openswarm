@@ -17,6 +17,7 @@ const fs = require('fs');
 const getPort = require('get-port');
 const http = require('http');
 const affiliateTracking = require('./affiliateTracking');
+const workflowsLifecycle = require('./workflowsLifecycle');
 
 // Defender warmup helper. Touches bundled exes so Windows scans them now instead of on first launch.
 function _squirrelPrewarmTouch() {
@@ -625,6 +626,10 @@ function markBackendReady() {
   if (backendReady) return;
   backendReady = true;
   _backendReadyResolve();
+  try {
+    workflowsLifecycle.setBackend({ port: backendPort, token: authToken });
+    workflowsLifecycle.startPolling();
+  } catch (_) {}
 }
 
 function getAuthTokenFilePath() {
@@ -1319,6 +1324,10 @@ app.on('before-quit', async (event) => {
   try {
     await postShutdownAllApps(2000);
   } catch (_) {}
+  // Give in-flight workflow runs up to 30s to land so we don't destroy paid LLM work.
+  try {
+    await workflowsLifecycle.drainOnQuit(30);
+  } catch (_) {}
   app.quit();
 });
 
@@ -1425,8 +1434,13 @@ ipcMain.handle('set-allow-prerelease', async (_e, value) => {
   return { success: true, changed: true };
 });
 
-ipcMain.handle('install-update', () => {
+ipcMain.handle('install-update', async () => {
   if (!autoUpdater) return;
+  // Veto while a workflow is in flight; lifecycle poller fires the deferred install once active drains.
+  try {
+    const vetoed = await workflowsLifecycle.maybeVetoInstall();
+    if (vetoed) return { vetoed: true };
+  } catch (_) {}
   // Built-in autoUpdater on Windows takes no args; electron-updater on Mac takes (isSilent, isForceRunAfter).
   if (isSquirrelUpdater) {
     autoUpdater.quitAndInstall();

@@ -971,18 +971,18 @@ const AgentCard: React.FC<Props> = ({
                   onMouseDown={(e) => e.stopPropagation()}
                   sx={{
                     display: 'inline-flex', alignItems: 'center', gap: 0.5,
-                    color: c.accent.primary,
-                    bgcolor: c.accent.primary + '12',
-                    border: `1px solid ${c.accent.primary}40`,
-                    fontSize: '0.78rem', fontWeight: 600,
-                    px: 1, py: 0.45,
+                    color: '#fff',
+                    bgcolor: c.accent.primary,
+                    border: `1px solid ${c.accent.primary}`,
+                    fontSize: '0.78rem', fontWeight: 700,
+                    px: 1.1, py: 0.5,
                     borderRadius: `${c.radius.md}px`,
                     cursor: 'pointer',
-                    '&:hover': { bgcolor: c.accent.primary + '22' },
+                    '&:hover': { filter: 'brightness(1.05)' },
                   }}
                 >
                   <AutoAwesomeIcon sx={{ fontSize: 14 }} />
-                  Make workflow
+                  Convert to workflow
                 </Box>
               </Tooltip>
             )}

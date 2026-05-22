@@ -17,10 +17,43 @@ import { useAppDispatch } from '@/shared/hooks';
 import { updateWorkflow, updateWorkflowCard, type ScheduleConfig, type Workflow } from '@/shared/state/workflowsSlice';
 import StepList from './StepList';
 import { API_BASE, getAuthToken } from '@/shared/config';
+import { useAppSelector as _useAppSelector } from '@/shared/hooks';
 
 interface Props {
   workflow: Workflow;
   steps: Workflow['steps'];
+}
+
+function InlineSubtitle({ workflow }: { workflow: Workflow }) {
+  const c = useClaudeTokens();
+  const modelsByProvider = _useAppSelector((s) => s.models.byProvider);
+  const runs = _useAppSelector((s) => s.workflows.runs[workflow.id]);
+  const modelLabel = React.useMemo(() => {
+    if (!workflow?.model) return '';
+    for (const list of Object.values(modelsByProvider || {})) {
+      for (const m of (list as Array<{ value: string; label?: string }>) || []) {
+        if (m.value === workflow.model) return m.label || workflow.model;
+      }
+    }
+    return workflow.model;
+  }, [workflow?.model, modelsByProvider]);
+  const duration = React.useMemo(() => {
+    if (!runs || runs.length === 0) return '';
+    const last = runs.find((r) => r.finished_at);
+    if (!last || !last.finished_at) return '';
+    const ms = new Date(last.finished_at).getTime() - new Date(last.started_at).getTime();
+    if (ms <= 0) return '';
+    if (ms < 1000) return `${ms}ms`;
+    if (ms < 60_000) return `${Math.round(ms / 1000)}s`;
+    return `${Math.floor(ms / 60_000)}m`;
+  }, [runs]);
+  return (
+    <Box sx={{ display: 'inline-flex', alignItems: 'center', gap: 1.25, fontSize: '0.82rem', color: c.text.muted, minWidth: 0, overflow: 'hidden' }}>
+      {modelLabel && <Box component="span" sx={{ whiteSpace: 'nowrap' }}>{modelLabel}</Box>}
+      {workflow.mode && <Box component="span" sx={{ whiteSpace: 'nowrap' }}>{workflow.mode}</Box>}
+      {duration && <Box component="span" sx={{ whiteSpace: 'nowrap' }}>{duration}</Box>}
+    </Box>
+  );
 }
 
 export default function SchedulingView({ workflow, steps }: Props) {
@@ -82,9 +115,11 @@ export default function SchedulingView({ workflow, steps }: Props) {
 
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.25, minHeight: '100%' }}>
-      {/* Inline header replacement. The default History/Run row is hidden
-          for 'scheduling' view; this Cancel button sits in its place. */}
-      <Box sx={{ display: 'flex', justifyContent: 'flex-end' }}>
+      {/* Inline header replacement. Image #49: subtitle on LEFT, Cancel
+          on RIGHT. The default History/Run row is hidden for 'scheduling'. */}
+      <Box sx={{ display: 'flex', alignItems: 'center' }}>
+        <InlineSubtitle workflow={workflow} />
+        <Box sx={{ flex: 1 }} />
         <Box
           onClick={onCancel}
           role="button"

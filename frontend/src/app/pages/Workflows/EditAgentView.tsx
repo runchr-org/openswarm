@@ -21,6 +21,8 @@ import DeleteOutlineRounded from '@mui/icons-material/DeleteOutlineRounded';
 import SaveOutlinedIcon from '@mui/icons-material/SaveOutlined';
 import PlayArrowRounded from '@mui/icons-material/PlayArrowRounded';
 import BuildRounded from '@mui/icons-material/BuildRounded';
+import TuneRounded from '@mui/icons-material/TuneRounded';
+import KeyboardArrowDownRounded from '@mui/icons-material/KeyboardArrowDownRounded';
 import { useClaudeTokens } from '@/shared/styles/ThemeContext';
 import { useAppDispatch, useAppSelector } from '@/shared/hooks';
 import { clearFixSeed, setCardSidecar, updateWorkflow, updateWorkflowCard, type Workflow } from '@/shared/state/workflowsSlice';
@@ -37,11 +39,43 @@ interface Props {
   isFixMode?: boolean;
 }
 
+function InlineSubtitle({ workflow }: { workflow: Workflow }) {
+  const c = useClaudeTokens();
+  const modelsByProvider = useAppSelector((s) => s.models.byProvider);
+  const runs = useAppSelector((s) => s.workflows.runs[workflow.id]);
+  const modelLabel = React.useMemo(() => {
+    if (!workflow?.model) return '';
+    for (const list of Object.values(modelsByProvider || {})) {
+      for (const m of (list as Array<{ value: string; label?: string }>) || []) {
+        if (m.value === workflow.model) return m.label || workflow.model;
+      }
+    }
+    return workflow.model;
+  }, [workflow?.model, modelsByProvider]);
+  const duration = React.useMemo(() => {
+    if (!runs || runs.length === 0) return '';
+    const last = runs.find((r) => r.finished_at);
+    if (!last || !last.finished_at) return '';
+    const ms = new Date(last.finished_at).getTime() - new Date(last.started_at).getTime();
+    if (ms <= 0) return '';
+    if (ms < 1000) return `${ms}ms`;
+    if (ms < 60_000) return `${Math.round(ms / 1000)}s`;
+    return `${Math.floor(ms / 60_000)}m`;
+  }, [runs]);
+  return (
+    <Box sx={{ display: 'inline-flex', alignItems: 'center', gap: 1.25, fontSize: '0.82rem', color: c.text.muted, minWidth: 0, overflow: 'hidden' }}>
+      {modelLabel && <Box component="span" sx={{ whiteSpace: 'nowrap' }}>{modelLabel}</Box>}
+      {workflow.mode && <Box component="span" sx={{ whiteSpace: 'nowrap' }}>{workflow.mode}</Box>}
+      {duration && <Box component="span" sx={{ whiteSpace: 'nowrap' }}>{duration}</Box>}
+    </Box>
+  );
+}
+
 type Turn =
   | { kind: 'user'; text: string }
   | { kind: 'assistant'; text: string }
   | { kind: 'proposal'; stepIdx: number; before: string; after: string; explanation: string; applied: boolean }
-  | { kind: 'fix-prefix'; stepIdx: number; stepLabel: string; error: string };
+  | { kind: 'fix-prefix'; stepIdx: number; stepLabel: string; error: string; expanded: boolean };
 
 export default function EditAgentView({ workflow, steps, isFixMode = false }: Props) {
   const c = useClaudeTokens();
@@ -54,7 +88,7 @@ export default function EditAgentView({ workflow, steps, isFixMode = false }: Pr
 
   const [draftSteps, setDraftSteps] = useState<Workflow['steps']>(steps);
   const [turns, setTurns] = useState<Turn[]>(() => isFixMode && fixSeed ? [
-    { kind: 'fix-prefix', stepIdx: fixSeed.stepIdx, stepLabel: fixSeed.stepLabel, error: fixSeed.error },
+    { kind: 'fix-prefix', stepIdx: fixSeed.stepIdx, stepLabel: fixSeed.stepLabel, error: fixSeed.error, expanded: false },
   ] : [
     { kind: 'assistant', text: 'How would you like to modify the workflow (e.g. filter out spam emails before summarizing)' },
   ]);
@@ -221,10 +255,25 @@ export default function EditAgentView({ workflow, steps, isFixMode = false }: Pr
 
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.25, minHeight: '100%' }}>
-      {/* Inline header replacement. The card's default action bar is
-          hidden for edit_agent / fix_agent views. */}
+      {/* Inline header replacement. Matches Image #38: subtitle on the
+          LEFT, Settings + Discard + Save flush right. The card's default
+          action bar is hidden for edit_agent / fix_agent views. */}
       <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+        <InlineSubtitle workflow={workflow} />
         <Box sx={{ flex: 1 }} />
+        <Tooltip title="Permissions, actions, cost cap">
+          <Box
+            onClick={() => dispatch(updateWorkflowCard({ workflowId: workflow.id, patch: { view: 'edit', editFacet: 'Actions' } }))}
+            role="button"
+            sx={{
+              display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+              width: 28, height: 28, borderRadius: 999,
+              color: c.text.secondary, cursor: 'pointer',
+              '&:hover': { color: c.text.primary, bgcolor: c.bg.elevated },
+            }}>
+            <TuneRounded sx={{ fontSize: 16 }} />
+          </Box>
+        </Tooltip>
         <HeaderBtn
           label="Discard"
           icon={<DeleteOutlineRounded sx={{ fontSize: 16 }} />}
@@ -249,13 +298,23 @@ export default function EditAgentView({ workflow, steps, isFixMode = false }: Pr
       <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
         {turns.map((t, idx) => {
           if (t.kind === 'fix-prefix') {
+            const PREVIEW_MAX = 110;
+            const needsExpand = (t.error || '').length > PREVIEW_MAX;
+            const shown = !needsExpand || t.expanded
+              ? t.error
+              : (t.error || '').slice(0, PREVIEW_MAX).trimEnd() + '…';
             return (
-              <Box key={idx} sx={{
-                display: 'flex', alignItems: 'flex-start', gap: 1.25,
-                p: 1.25, borderRadius: `${c.radius.lg}px`,
-                bgcolor: c.status.errorBg,
-                border: `1px solid ${c.status.error}30`,
-              }}>
+              <Box
+                key={idx}
+                onClick={needsExpand ? () => setTurns((all) => all.map((tt, i) => i === idx && tt.kind === 'fix-prefix' ? { ...tt, expanded: !tt.expanded } : tt)) : undefined}
+                sx={{
+                  display: 'flex', alignItems: 'flex-start', gap: 1.25,
+                  p: 1.25, borderRadius: `${c.radius.lg}px`,
+                  bgcolor: c.status.errorBg,
+                  border: `1px solid ${c.status.error}30`,
+                  cursor: needsExpand ? 'pointer' : 'default',
+                  '&:hover': needsExpand ? { bgcolor: c.status.error + '14' } : {},
+                }}>
                 <Box sx={{
                   width: 32, height: 32, borderRadius: `${c.radius.md}px`,
                   bgcolor: c.status.error + '22', color: c.status.error,
@@ -264,11 +323,22 @@ export default function EditAgentView({ workflow, steps, isFixMode = false }: Pr
                   <BuildRounded sx={{ fontSize: 16 }} />
                 </Box>
                 <Box sx={{ flex: 1, minWidth: 0 }}>
-                  <Typography sx={{ fontSize: '0.92rem', fontWeight: 700, color: c.text.primary, lineHeight: 1.3 }}>
-                    Fixing Step {t.stepIdx + 1}: {t.stepLabel}
-                  </Typography>
-                  <Typography sx={{ fontSize: '0.82rem', color: c.text.secondary, mt: 0.25, lineHeight: 1.45 }}>
-                    {t.error}
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                    <Typography sx={{ flex: 1, fontSize: '0.92rem', fontWeight: 700, color: c.text.primary, lineHeight: 1.3 }}>
+                      Fixing Step {t.stepIdx + 1}: {t.stepLabel}
+                    </Typography>
+                    {needsExpand && (
+                      <KeyboardArrowDownRounded sx={{
+                        fontSize: 18,
+                        color: c.text.muted,
+                        transform: t.expanded ? 'rotate(180deg)' : 'none',
+                        transition: 'transform 0.18s ease',
+                        flexShrink: 0,
+                      }} />
+                    )}
+                  </Box>
+                  <Typography sx={{ fontSize: '0.82rem', color: c.text.secondary, mt: 0.25, lineHeight: 1.45, whiteSpace: 'pre-wrap' }}>
+                    {shown}
                   </Typography>
                 </Box>
               </Box>

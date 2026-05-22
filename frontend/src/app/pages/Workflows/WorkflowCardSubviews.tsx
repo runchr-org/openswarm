@@ -7,7 +7,6 @@ import InputBase from '@mui/material/InputBase';
 import HistoryIcon from '@mui/icons-material/HistoryToggleOffRounded';
 import CalendarTodayRounded from '@mui/icons-material/CalendarTodayRounded';
 import EditOutlined from '@mui/icons-material/EditOutlined';
-import TuneRounded from '@mui/icons-material/TuneRounded';
 import { useClaudeTokens } from '@/shared/styles/ThemeContext';
 import { useAppDispatch, useAppSelector } from '@/shared/hooks';
 import {
@@ -239,13 +238,15 @@ function describeSchedule(workflow: Workflow): string {
   const h12 = ((s.hour + 11) % 12) + 1;
   const ampm = s.hour < 12 ? 'am' : 'pm';
   const time = s.minute === 0 ? `${h12}${ampm}` : `${h12}:${String(s.minute).padStart(2, '0')}${ampm}`;
-  if (s.repeat_unit === 'day') return s.repeat_every === 1 ? `Every day at ${time}` : `Every ${s.repeat_every} days at ${time}`;
-  if (s.repeat_unit === 'month') return s.repeat_every === 1 ? `Every month at ${time}` : `Every ${s.repeat_every} months at ${time}`;
+  if (s.repeat_unit === 'day') return s.repeat_every === 1 ? `Daily at ${time}` : `Every ${s.repeat_every} days at ${time}`;
+  if (s.repeat_unit === 'month') return s.repeat_every === 1 ? `Monthly at ${time}` : `Every ${s.repeat_every} months at ${time}`;
   if (s.on_days.length === 5 && [1,2,3,4,5].every((d) => s.on_days.includes(d))) return `Weekdays at ${time}`;
   if (s.on_days.length === 2 && [0,6].every((d) => s.on_days.includes(d))) return `Weekends at ${time}`;
   if (s.on_days.length === 1) {
-    const labels = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-    return `Every ${labels[s.on_days[0]]} at ${time}`;
+    // Image #50: "Mondays at 3pm" (plural day, no "Every" prefix). Reads
+    // more naturally than "Every Mon at 3pm".
+    const plurals = ['Sundays', 'Mondays', 'Tuesdays', 'Wednesdays', 'Thursdays', 'Fridays', 'Saturdays'];
+    return `${plurals[s.on_days[0]]} at ${time}`;
   }
   return `Weekly at ${time}`;
 }
@@ -261,12 +262,6 @@ export function SavedView({ workflow, steps, runs, activeRunId }: { workflow: Wo
   }, [dispatch, workflow.id]);
   const openScheduling = useCallback(() => {
     dispatch(updateWorkflowCard({ workflowId: workflow.id, patch: { view: 'scheduling' } }));
-  }, [dispatch, workflow.id]);
-  const openFacetEditor = useCallback(() => {
-    // Legacy General/Actions/Schedule facet picker. The new chat-based
-    // EditAgentView replaces it for step iteration; this is the escape
-    // hatch for permissions, cost cap, action allowlists, etc.
-    dispatch(updateWorkflowCard({ workflowId: workflow.id, patch: { view: 'edit', editFacet: 'Actions' } }));
   }, [dispatch, workflow.id]);
   const onToggleStep = useCallback((stepId: string) => {
     dispatch(toggleExpandedStep({ workflowId: workflow.id, stepId }));
@@ -298,37 +293,22 @@ export function SavedView({ workflow, steps, runs, activeRunId }: { workflow: Wo
           <CalendarTodayRounded sx={{ fontSize: 15, color: c.text.muted, flexShrink: 0 }} />
           <Box component="span" sx={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{scheduleLine}</Box>
         </Box>
-        <Box sx={{ display: 'inline-flex', alignItems: 'center', gap: 0.5 }}>
-          <Tooltip title="Permissions, actions, cost cap">
-            <Box
-              onClick={openFacetEditor}
-              role="button"
-              sx={{
-                display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-                width: 28, height: 28, borderRadius: 999,
-                color: c.text.secondary, cursor: 'pointer',
-                '&:hover': { color: c.text.primary, bgcolor: c.bg.elevated },
-              }}>
-              <TuneRounded sx={{ fontSize: 16 }} />
-            </Box>
-          </Tooltip>
-          <Box
-            onClick={openEditAgent}
-            role="button"
-            sx={{
-              display: 'inline-flex', alignItems: 'center', gap: 0.45,
-              fontSize: '0.82rem', fontWeight: 600,
-              px: 1.25, py: 0.5,
-              borderRadius: 999,
-              cursor: 'pointer',
-              color: c.text.secondary,
-              bgcolor: 'transparent',
-              border: `1px solid ${c.border.medium}`,
-              '&:hover': { bgcolor: c.bg.elevated, borderColor: c.border.strong || c.border.medium, color: c.text.primary },
-            }}>
-            <EditOutlined sx={{ fontSize: 15 }} />
-            Edit
-          </Box>
+        <Box
+          onClick={openEditAgent}
+          role="button"
+          sx={{
+            display: 'inline-flex', alignItems: 'center', gap: 0.45,
+            fontSize: '0.82rem', fontWeight: 600,
+            px: 1.25, py: 0.5,
+            borderRadius: 999,
+            cursor: 'pointer',
+            color: c.text.secondary,
+            bgcolor: 'transparent',
+            border: `1px solid ${c.border.medium}`,
+            '&:hover': { bgcolor: c.bg.elevated, borderColor: c.border.strong || c.border.medium, color: c.text.primary },
+          }}>
+          <EditOutlined sx={{ fontSize: 15 }} />
+          Edit
         </Box>
       </Box>
     </Box>

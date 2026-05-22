@@ -305,30 +305,32 @@ export function CompletedView({ workflow, steps, runs, mode = 'card' }: {
         stepStatuses={statuses}
       />
       <Box sx={{ flex: 1 }} />
-      {/* Success card. Soft green tint + rocket icon. Per Image #42 the
-          subtitle copy ends with "...see exactly what the agent did." */}
-      <Box sx={{
-        display: 'flex', alignItems: 'flex-start', gap: 1.25,
-        p: 1.5, borderRadius: `${c.radius.lg}px`,
-        bgcolor: c.status.successBg,
-        border: `1px solid ${c.status.success}30`,
-      }}>
+      {/* Success card. Hidden in sidecar-linked mode (Image #43) so the
+          compacted card stays tight. Soft green tint + rocket icon. */}
+      {!isLinked && (
         <Box sx={{
-          width: 32, height: 32, borderRadius: `${c.radius.md}px`,
-          bgcolor: c.status.success + '22', color: c.status.success,
-          display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
+          display: 'flex', alignItems: 'flex-start', gap: 1.25,
+          p: 1.5, borderRadius: `${c.radius.lg}px`,
+          bgcolor: c.status.successBg,
+          border: `1px solid ${c.status.success}30`,
         }}>
-          <RocketLaunchRounded sx={{ fontSize: 16 }} />
+          <Box sx={{
+            width: 32, height: 32, borderRadius: `${c.radius.md}px`,
+            bgcolor: c.status.success + '22', color: c.status.success,
+            display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
+          }}>
+            <RocketLaunchRounded sx={{ fontSize: 16 }} />
+          </Box>
+          <Box sx={{ flex: 1, minWidth: 0 }}>
+            <Typography sx={{ fontSize: '0.95rem', fontWeight: 700, color: c.text.primary, lineHeight: 1.3 }}>
+              Workflow Success!
+            </Typography>
+            <Typography sx={{ fontSize: '0.82rem', color: c.text.secondary, mt: 0.25, lineHeight: 1.45 }}>
+              If you&apos;re curious, you can click the green button below to see exactly what the agent did.
+            </Typography>
+          </Box>
         </Box>
-        <Box sx={{ flex: 1, minWidth: 0 }}>
-          <Typography sx={{ fontSize: '0.95rem', fontWeight: 700, color: c.text.primary, lineHeight: 1.3 }}>
-            Workflow Success!
-          </Typography>
-          <Typography sx={{ fontSize: '0.82rem', color: c.text.secondary, mt: 0.25, lineHeight: 1.45 }}>
-            If you&apos;re curious, you can click the green button below to see exactly what the agent did.
-          </Typography>
-        </Box>
-      </Box>
+      )}
       <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.25 }}>
         <PillButton
           label="Edit"
@@ -338,7 +340,9 @@ export function CompletedView({ workflow, steps, runs, mode = 'card' }: {
           onClick={onEdit}
         />
         <Box sx={{ flex: 1 }} />
-        <GhostTextBtn label="Done" onClick={onDone} />
+        {/* Image #43: Done is hidden in sidecar mode; Stop Viewing alone
+            fills the right slot. Default mode keeps Done + View Agent. */}
+        {!isLinked && <GhostTextBtn label="Done" onClick={onDone} />}
         {isLinked ? (
           <PillButton
             label="Stop Viewing"

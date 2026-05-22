@@ -451,9 +451,13 @@ const WorkflowCard: React.FC<Props> = ({
             }}
           />
         ) : (
-          <Typography sx={{ flex: 1, fontWeight: 700, fontSize: '1rem', color: c.text.primary, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', letterSpacing: '-0.005em' }}>
-            {title}
-          </Typography>
+          <>
+            <Typography sx={{ fontWeight: 700, fontSize: '1rem', color: c.text.primary, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', letterSpacing: '-0.005em' }}>
+              {title}
+            </Typography>
+            <StatusPill view={card.view} workflow={workflow} runs={runs} />
+            <Box sx={{ flex: 1 }} />
+          </>
         )}
         {runs && runs.length > 0 && <RunSparkline runs={runs} />}
         <IconButton
@@ -471,7 +475,8 @@ const WorkflowCard: React.FC<Props> = ({
           The flex spacer is the empty left side; History is a quiet text link, Run is the
           accent pill. */}
       {isDraft && (
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.6, px: 2, pb: 1.25, pt: 0, flexShrink: 0, opacity: 0.45, pointerEvents: 'none' }}>
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.6, px: 2, pb: 1.25, pt: 0, flexShrink: 0 }}>
+          <SubtitleRow workflow={null} runs={null} />
           <Box sx={{ flex: 1 }} />
           <TabBtn label="History" icon={<HistoryIcon sx={{ fontSize: 16 }} />} active={false} onClick={() => {}} />
           <TabBtn label="Run" icon={<PlayArrowIcon sx={{ fontSize: 16 }} />} active={false} accent onClick={() => {}} />
@@ -479,6 +484,7 @@ const WorkflowCard: React.FC<Props> = ({
       )}
       {!isDraft && workflow && !isHeaderlessView(card.view) && card.view !== 'running' && (
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.6, px: 2, pb: 1.25, pt: 0, flexShrink: 0 }}>
+          <SubtitleRow workflow={workflow} runs={runs} />
           <Box sx={{ flex: 1 }} />
           <TabBtn
             label="History"
@@ -677,6 +683,77 @@ function isHeaderlessView(view: string): boolean {
   return view === 'edit_agent' || view === 'fix_agent' || view === 'scheduling';
 }
 
+function StatusPill({ view, workflow, runs }: { view: string; workflow: Workflow | undefined; runs: import('@/shared/state/workflowsSlice').WorkflowRun[] | undefined }) {
+  const c = useClaudeTokens();
+  // Pills appear on the title row to mirror Image #34 (completed source
+  // chat), #40 (running), #42 (completed workflow), #41 (running while
+  // watching). Saved / Preview / Edit / Scheduling have no pill.
+  let label = '';
+  let color = c.text.muted;
+  let bg = c.bg.elevated;
+  if (view === 'running') {
+    label = 'running';
+    color = c.status.success;
+    bg = c.status.successBg;
+  } else if (view === 'completed') {
+    label = 'completed';
+    color = c.text.secondary;
+    bg = c.bg.elevated;
+  } else {
+    // Image #46: failed view has NO pill in the title row; the red X
+    // on the failed step row carries the signal. Preview/Saved/Edit/
+    // Scheduling are likewise pill-less.
+    void workflow; void runs;
+    return null;
+  }
+  return (
+    <Box sx={{
+      display: 'inline-flex', alignItems: 'center',
+      fontSize: '0.74rem', fontWeight: 600,
+      px: 0.8, py: 0.18, borderRadius: `${c.radius.md}px`,
+      color, bgcolor: bg,
+      ml: 0.25,
+    }}>{label}</Box>
+  );
+}
+
+function SubtitleRow({ workflow, runs }: { workflow: Workflow | null; runs: import('@/shared/state/workflowsSlice').WorkflowRun[] | null }) {
+  const c = useClaudeTokens();
+  const modelsByProvider = useAppSelector((s) => s.models.byProvider);
+  // Match Image #34/#35/#36/#38/#40: "Claude Opus 4.6  agent  28s".
+  // Spaces between fields, all in muted text. Duration is the most
+  // recent finished run's elapsed time; falls back to nothing when no
+  // run has completed yet (PreviewView).
+  const modelLabel = React.useMemo(() => {
+    if (!workflow?.model) return '';
+    for (const list of Object.values(modelsByProvider || {})) {
+      for (const m of (list as any[]) || []) {
+        if (m.value === workflow.model) return m.label || workflow.model;
+      }
+    }
+    return workflow.model;
+  }, [workflow?.model, modelsByProvider]);
+  const modeLabel = workflow?.mode || '';
+  const duration = React.useMemo(() => {
+    if (!runs || runs.length === 0) return '';
+    const last = runs.find((r) => r.finished_at);
+    if (!last || !last.finished_at) return '';
+    const ms = new Date(last.finished_at).getTime() - new Date(last.started_at).getTime();
+    if (ms <= 0) return '';
+    if (ms < 1000) return `${ms}ms`;
+    if (ms < 60_000) return `${Math.round(ms / 1000)}s`;
+    const m = Math.floor(ms / 60_000);
+    return `${m}m`;
+  }, [runs]);
+  return (
+    <Box sx={{ display: 'inline-flex', alignItems: 'center', gap: 1.25, fontSize: '0.82rem', color: c.text.muted, minWidth: 0, overflow: 'hidden' }}>
+      {modelLabel && <Box component="span" sx={{ whiteSpace: 'nowrap' }}>{modelLabel}</Box>}
+      {modeLabel && <Box component="span" sx={{ whiteSpace: 'nowrap' }}>{modeLabel}</Box>}
+      {duration && <Box component="span" sx={{ whiteSpace: 'nowrap' }}>{duration}</Box>}
+    </Box>
+  );
+}
+
 function RunningHeader({ workflowId }: { workflowId: string }) {
   const c = useClaudeTokens();
   const dispatch = useAppDispatch();
@@ -714,6 +791,7 @@ function RunningHeader({ workflowId }: { workflowId: string }) {
   }, [dispatch, workflow, isPaused]);
   return (
     <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.6, px: 2, pb: 1.25, pt: 0, flexShrink: 0 }}>
+      <SubtitleRow workflow={workflow || null} runs={runs || null} />
       <Box sx={{ flex: 1 }} />
       <Box
         onClick={onStop}

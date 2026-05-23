@@ -172,20 +172,3 @@ async def fetch_openrouter_models(api_key: str | None) -> list[dict]:
 
     _or_models_cache.update(models=out, fetched_at=now, ok=True)
     return out
-
-
-def _is_9router_available() -> bool:
-    """Check if 9Router is running on localhost:20128. Caches for 30 seconds."""
-    import time as _time
-    now = _time.time()
-    if _9router_cache["available"] is not None and now - _9router_cache["checked_at"] < 30:
-        return _9router_cache["available"]
-    try:
-        import httpx
-        r = httpx.get("http://localhost:20128/v1/models", timeout=2.0)
-        available = r.status_code == 200
-    except Exception:
-        available = False
-    _9router_cache["available"] = available
-    _9router_cache["checked_at"] = now
-    return available

@@ -51,7 +51,6 @@ requests_delta
 thinking_params_for
 _resolve_model
 load_output
-_is_9router_available
 submit_state
 get_provider_credentials
 DISCOVERY_SCAFFOLDING

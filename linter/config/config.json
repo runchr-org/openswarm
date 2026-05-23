@@ -103,7 +103,6 @@
       "frontend/src/app/pages/AgentChat/BrowserAgentInlineFeed.tsx",
       "frontend/src/app/pages/AgentChat/ChatInput.tsx",
       "frontend/src/app/pages/AgentChat/MessageBubble.tsx",
-      "frontend/src/app/pages/AgentChat/ToolCallBubble.tsx",
       "frontend/src/app/pages/AgentChat/toolLabels.ts",
       "frontend/src/app/pages/Analytics/PixelChart.tsx",
       "frontend/src/app/pages/Commands/Commands.tsx",

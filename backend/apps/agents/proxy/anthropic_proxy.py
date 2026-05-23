@@ -382,7 +382,7 @@ async def proxy(rest: str, request: Request):
     except Exception:
         parsed_for_bypass = None
     if isinstance(parsed_for_bypass, dict):
-        from backend.apps.agents.anthropic_to_openai import (
+        from backend.apps.agents.proxy.anthropic_to_openai import (
             should_bypass_9router as _should_bypass_oai,
             should_bypass_9router_for_openrouter as _should_bypass_or,
             forward_to_openai as _forward_oai,

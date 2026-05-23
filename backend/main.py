@@ -31,7 +31,7 @@ from backend.apps.service.service import service
 from backend.apps.subscription.router import subscription
 from backend.apps.auth.router import auth
 from backend.apps.web.web import web
-from backend.apps.agents.anthropic_proxy import anthropic_proxy
+from backend.apps.agents.proxy.anthropic_proxy import anthropic_proxy
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi import WebSocket, WebSocketDisconnect
 import json

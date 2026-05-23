@@ -950,6 +950,14 @@ const AgentChat: React.FC<AgentChatProps> = ({ sessionId: sessionIdProp, onClose
                   size="small"
                   onClick={async () => {
                     const sid = id;
+                    // Reset local UI state first; clearSessionMessages only touches Redux session.messages, so showResumeBubble/awaitingResponse/the queue otherwise survive and a "thinking" or "Resume agent response" bubble lingers on a now-empty chat.
+                    setShowResumeBubble(false);
+                    setAwaitingResponse(false);
+                    messageQueueRef.current = [];
+                    setQueueLength(0);
+                    setQueueExpanded(false);
+                    setEditingQueueIdx(null);
+                    setEditingQueueText('');
                     try {
                       const tok = (() => { try { return getAuthToken(); } catch { return ''; } })();
                       const headers: Record<string, string> = { 'Content-Type': 'application/json' };

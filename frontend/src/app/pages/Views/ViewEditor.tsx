@@ -601,11 +601,22 @@ const ViewEditor: React.FC<Props> = ({ output }) => {
   sessionStatusRef.current = agentStatus;
   const isLaunchedRef = useRef(false);
   isLaunchedRef.current = isLaunched;
+  // Track if the draft has any user messages on it. If it does, the user has interacted (likely a send is in flight) and GC would orphan the backend session that's about to materialize via draftLaunchMap.
+  const draftMessageCount = useAppSelector((state) =>
+    initialDraftId ? (state.agents.sessions[initialDraftId]?.messages?.length ?? 0) : 0,
+  );
+  const draftHasMessagesRef = useRef(false);
+  draftHasMessagesRef.current = draftMessageCount > 0;
 
   useEffect(() => {
     return () => {
-      // GC only abandoned drafts; launched sessions live on the backend independently.
-      if (initialDraftId && sessionStatusRef.current === 'draft' && !isLaunchedRef.current) {
+      // GC only truly-abandoned drafts: status still 'draft', never promoted via draftLaunchMap, and the user never sent anything. Sending a message kicks off launchAndSendFirstMessage, which races against unmount; if we GC mid-flight we lose the linkage to the new backend session and the reopen path shows an empty editor.
+      if (
+        initialDraftId
+        && sessionStatusRef.current === 'draft'
+        && !isLaunchedRef.current
+        && !draftHasMessagesRef.current
+      ) {
         dispatch(removeDraftSession(initialDraftId));
       }
     };

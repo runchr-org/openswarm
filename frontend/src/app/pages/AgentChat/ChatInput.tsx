@@ -812,12 +812,6 @@ const ChatInput = forwardRef<ChatInputHandle, Props>(({ onSend, disabled, mode, 
   );
   const imageSupported = ['anthropic', 'gemini', 'gemini-cli', 'openai', 'openrouter'].includes(currentModelApi);
 
-  const pendingPayloadEstimate = useMemo(() => {
-    const history = Math.max(0, contextEstimate?.used ?? 0);
-    const filesSum = contextPaths.reduce((acc, cp) => acc + (cp.tokens || 0), 0);
-    return history + (sessionFrameworkOverhead || 0) + filesSum;
-  }, [contextEstimate, contextPaths, sessionFrameworkOverhead]);
-
   const pendingKinds = useMemo(() => {
     const set = new Set<string>();
     for (const cp of contextPaths) {
@@ -2267,29 +2261,11 @@ const ChatInput = forwardRef<ChatInputHandle, Props>(({ onSend, disabled, mode, 
                             const cannotPdf = pendingKinds.has('pdf') && !optSupportsPdf;
                             const cannotImg = pendingKinds.has('image') && !optSupportsImage;
                             if (!win) return null;
-                            const fits = pendingPayloadEstimate > 0 && win >= Math.floor(pendingPayloadEstimate * 1.1);
-                            const tight = pendingPayloadEstimate > 0 && !fits && win >= pendingPayloadEstimate;
-                            const tooSmall = pendingPayloadEstimate > 0 && win < pendingPayloadEstimate;
                             return (
                               <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, ml: 1 }}>
                                 {(cannotPdf || cannotImg) && (
                                   <Box sx={{ fontSize: '0.62rem', color: '#ef4444', border: '1px solid #ef444440', borderRadius: '4px', px: 0.5, py: 0.05, lineHeight: 1.4 }}>
                                     No {cannotPdf ? 'PDF' : 'image'}
-                                  </Box>
-                                )}
-                                {!cannotPdf && !cannotImg && fits && (
-                                  <Box sx={{ fontSize: '0.62rem', color: '#10b981', border: '1px solid #10b98140', borderRadius: '4px', px: 0.5, py: 0.05, lineHeight: 1.4 }}>
-                                    Fits
-                                  </Box>
-                                )}
-                                {!cannotPdf && !cannotImg && tight && (
-                                  <Box sx={{ fontSize: '0.62rem', color: '#f59e0b', border: '1px solid #f59e0b40', borderRadius: '4px', px: 0.5, py: 0.05, lineHeight: 1.4 }}>
-                                    Tight
-                                  </Box>
-                                )}
-                                {!cannotPdf && !cannotImg && tooSmall && (
-                                  <Box sx={{ fontSize: '0.62rem', color: '#ef4444', border: '1px solid #ef444440', borderRadius: '4px', px: 0.5, py: 0.05, lineHeight: 1.4 }}>
-                                    Too small
                                   </Box>
                                 )}
                                 <Typography sx={{ fontSize: '0.66rem', color: c.text.ghost, fontVariantNumeric: 'tabular-nums' }}>

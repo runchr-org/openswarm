@@ -939,29 +939,37 @@ const AgentChat: React.FC<AgentChatProps> = ({ sessionId: sessionIdProp, onClose
                     const pct = liveInput > 0
                       ? Math.min(1, liveInput / Math.max(1, liveWindow))
                       : (contextEstimate.used / Math.max(1, liveWindow));
-                    if (pct <= 0) return null;
-                    const pctTxt = `${Math.round(pct * 100)}%`;
-                    const color = pct >= 0.85 ? '#ef4444' : pct >= 0.60 ? '#f59e0b' : c.text.tertiary;
                     const mcpCount = session.active_mcps?.length ?? 0;
-                    const fwOverhead = session.framework_overhead_tokens ?? 0;
-                    const systemTokens = Math.round((session.system_prompt?.length ?? 0) / 4);
-                    const historyTokens = Math.max(0, contextEstimate.used - systemTokens);
-                    const fmt = (n: number) => n >= 1000 ? `${(n / 1000).toFixed(1)}K` : String(n);
-                    const breakdown = [
-                      `Context ${pctTxt} of ${fmt(liveWindow)}`,
-                      liveInput > 0 ? `Reported by API: ${fmt(liveInput)} input tokens` : null,
-                      `History: ~${fmt(historyTokens)}`,
-                      `System prompt: ~${fmt(systemTokens)}`,
-                      fwOverhead > 0 ? `Tools + MCPs + preset: ~${fmt(fwOverhead)}` : null,
-                      `${mcpCount} MCP${mcpCount === 1 ? '' : 's'} active`,
-                    ].filter(Boolean).join(' · ');
+                    // Quiet until it matters: hide the memory meter until the chat is filling up,
+                    // and hide the tool count unless tools are actually connected.
+                    const showMemory = pct >= 0.60;
+                    const showTools = mcpCount > 0;
+                    if (!showMemory && !showTools) return null;
+                    const pctTxt = `${Math.round(pct * 100)}%`;
+                    const memColor = pct >= 0.85 ? '#ef4444' : '#f59e0b';
+                    const tip = [
+                      showMemory ? `Memory ${pctTxt} full. As the chat fills up, the oldest messages start dropping out.` : null,
+                      showTools ? `${mcpCount} tool${mcpCount === 1 ? '' : 's'} connected.` : null,
+                    ].filter(Boolean).join('\n');
                     return (
                       <Typography
                         variant="caption"
-                        sx={{ color, fontVariantNumeric: 'tabular-nums' }}
-                        title={breakdown}
+                        sx={{ display: 'inline-flex', alignItems: 'center', gap: 0.5, fontVariantNumeric: 'tabular-nums' }}
+                        title={tip}
                       >
-                        {pctTxt} ctx · {mcpCount} mcp
+                        {showMemory && (
+                          <Box component="span" sx={{ color: memColor, fontWeight: 500 }}>
+                            Memory {pctTxt} full
+                          </Box>
+                        )}
+                        {showMemory && showTools && (
+                          <Box component="span" sx={{ color: c.text.ghost }}>·</Box>
+                        )}
+                        {showTools && (
+                          <Box component="span" sx={{ color: c.text.tertiary }}>
+                            {mcpCount} tool{mcpCount === 1 ? '' : 's'}
+                          </Box>
+                        )}
                       </Typography>
                     );
                   })()}

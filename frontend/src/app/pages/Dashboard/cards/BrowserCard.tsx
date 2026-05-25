@@ -74,6 +74,8 @@ const HANDLE_DEFS: { dir: ResizeDir; sx: Record<string, any> }[] = [
 ];
 
 const isElectron = navigator.userAgent.includes('Electron');
+// eslint-disable-next-line no-console
+console.log('[diag][BrowserCard] isElectron=', isElectron, 'ua=', navigator.userAgent, 'hasOpenswarm=', !!(window as any).openswarm);
 
 const chromeUserAgent = navigator.userAgent
   .replace(/\s*Electron\/\S+/, '')

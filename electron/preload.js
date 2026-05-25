@@ -1,5 +1,8 @@
 const { contextBridge, ipcRenderer } = require('electron');
 
+// eslint-disable-next-line no-console
+console.log('[diag][preload] start, ua=', navigator.userAgent);
+
 // Synchronous exposure. The previous async IIFE (await ipcRenderer.invoke) raced React mount: any code reading window.openswarm during the gap (BrowserCard's Electron-detection falling back to iframe mode, AgentChat's auth-token call throwing) saw undefined. sendSync blocks the renderer for one IPC round-trip during preload before any user-visible paint, so window.openswarm is guaranteed to exist before the first frontend bundle evaluates.
 const port = ipcRenderer.sendSync('get-backend-port-sync');
 const webviewPreloadPath = ipcRenderer.sendSync('get-webview-preload-path-sync');

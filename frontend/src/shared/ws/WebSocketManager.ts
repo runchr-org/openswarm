@@ -192,6 +192,8 @@ class WebSocketManager {
     const token = _getAuthTokenSafe();
     const sep = this.url.includes('?') ? '&' : '?';
     const urlWithToken = token ? `${this.url}${sep}token=${encodeURIComponent(token)}` : this.url;
+    // eslint-disable-next-line no-console
+    console.log('[diag][ws] connect', this.url, 'sessionId=', this.options.sessionId, 'hasToken=', !!token);
     this.ws = new WebSocket(urlWithToken);
 
     this.ws.onopen = () => {

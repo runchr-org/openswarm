@@ -147,6 +147,8 @@ let isQuittingFromSplash = false;  // guards against double-quit during error sh
 let rendererCrashTimes = [];       // timestamps of recent render-process-gone events; caps the auto-reload retry storm
 const recentBackendStderr = [];   // ring buffer (last ~60 lines) for splash error UI
 let splashDataUrlCache = null;
+// Set to true around `new BrowserWindow()` for the top-level main window so the popup-UA spoofer in app.on('web-contents-created') doesn't accidentally rewrite the main window's UA. The web-contents-created event fires synchronously inside the BrowserWindow constructor, before mainWindow assignment returns; without this flag, the previous identity check (contents !== mainWindow.webContents) is racy across recreateMainWindow() because mainWindow still points to the OLD window during construction of the NEW one.
+let isCreatingMainWindow = false;
 
 const isPackaged = app.isPackaged;
 const isDev = process.env.ELECTRON_DEV === '1';
@@ -673,6 +675,8 @@ async function loadAuthToken() {
 }
 
 function createWindow() {
+  isCreatingMainWindow = true;
+  console.log('[diag][main] createWindow start');
   mainWindow = new BrowserWindow({
     width: 1400,
     height: 900,
@@ -784,6 +788,16 @@ function createWindow() {
   };
   mainWindow.on('blur', () => sendFocusEvent('blur'));
   mainWindow.on('focus', () => sendFocusEvent('focus'));
+
+  // Forward renderer console output to main stderr so packaged-build diagnostics survive without DevTools open.
+  mainWindow.webContents.on('console-message', (_e, level, message, line, sourceId) => {
+    const tag = ['LOG', 'INFO', 'WARN', 'ERROR'][level] || 'LOG';
+    const src = sourceId ? sourceId.split('/').pop() : '';
+    console.log(`[renderer:${tag}] ${message}${src ? ` (${src}:${line})` : ''}`);
+  });
+
+  isCreatingMainWindow = false;
+  console.log('[diag][main] createWindow end, ua=', mainWindow.webContents.getUserAgent());
 }
 
 // Crash recovery path A: tear down the dead BrowserWindow and stand up a fresh one. Used by the render-process-gone handler under the 3-in-60s cap.
@@ -795,14 +809,16 @@ function createWindow() {
 // Why setImmediate for the destroy:
 //   - We're INSIDE the old window's render-process-gone handler. Destroying its BrowserWindow from inside its own event callback works in current Electron but is fragile across version bumps; deferring one tick is free insurance.
 function recreateMainWindow() {
+  console.log('[diag][main] recreateMainWindow START, crashesInWindow=', rendererCrashTimes.length);
   const oldWindow = mainWindow;
   mainWindowReady = false;
   try {
     createWindow();
   } catch (err) {
-    console.error('[main] recreateMainWindow: createWindow failed:', err && err.message);
+    console.error('[diag][main] recreateMainWindow: createWindow failed:', err && err.message);
     return;
   }
+  console.log('[diag][main] recreateMainWindow created fresh window, ua=', mainWindow && mainWindow.webContents.getUserAgent());
   const freshWindow = (mainWindow && mainWindow !== oldWindow) ? mainWindow : null;
   if (freshWindow) {
     freshWindow.once('ready-to-show', () => {
@@ -1159,9 +1175,11 @@ app.on('web-contents-created', (_event, contents) => {
   // skipped — they render user-visited sites and must advertise the real UA.
   if (
     contents.getType() === 'window' &&
+    !isCreatingMainWindow &&
     mainWindow &&
     contents !== mainWindow.webContents
   ) {
+    console.log('[diag][main] spoofing UA for popup webContents id=', contents.id);
     const OAUTH_POPUP_UA = process.platform === 'win32'
       ? 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 ' +
         '(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36'

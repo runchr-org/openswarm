@@ -405,65 +405,6 @@ const DashboardToolbar = React.forwardRef<HTMLDivElement, Props>(
 
     return (
       <>
-      {(inputOpen || historyOpen) && (
-        // Image #54: paired mode pills above the composer/popover.
-        // The two states are mutually exclusive: opening one closes the
-        // other so the body underneath only renders one thing at a time.
-        <Box sx={{ display: 'flex', gap: 0.5, mb: 0.75, pl: 0.25 }}>
-          <Box
-            onClick={() => {
-              if (historyOpen) {
-                handleCloseHistory();
-                onNewAgent();
-              }
-              // If already in inputOpen, this is a no-op (we're already
-              // in new chat). The visible active styling tells the user
-              // that. Clicking again does nothing intentionally.
-            }}
-            role="button"
-            sx={{
-              display: 'inline-flex', alignItems: 'center', gap: 0.3,
-              fontSize: '0.74rem', fontWeight: 600,
-              color: c.text.primary,
-              bgcolor: c.bg.surface,
-              border: `1px solid ${inputOpen && !historyOpen ? c.border.medium : c.border.subtle}`,
-              boxShadow: inputOpen && !historyOpen ? c.shadow.sm : 'none',
-              px: 0.85, py: 0.3, borderRadius: 999,
-              cursor: historyOpen ? 'pointer' : 'default',
-              '&:hover': historyOpen ? { bgcolor: c.bg.elevated } : {},
-            }}>
-            <AddRounded sx={{ fontSize: 12 }} />
-            New Chat
-          </Box>
-          <Box
-            onClick={() => {
-              if (historyOpen) {
-                handleCloseHistory();
-                return;
-              }
-              // Close the composer first; inputOpen takes precedence in
-              // the render branch below so the popover would be hidden
-              // behind it otherwise.
-              if (inputOpen) onCancel();
-              setHistoryOpen(true);
-            }}
-            role="button"
-            sx={{
-              display: 'inline-flex', alignItems: 'center', gap: 0.3,
-              fontSize: '0.74rem', fontWeight: 600,
-              color: historyOpen ? c.text.primary : c.text.secondary,
-              bgcolor: c.bg.surface,
-              border: `1px solid ${historyOpen ? c.border.medium : c.border.subtle}`,
-              boxShadow: historyOpen ? c.shadow.sm : 'none',
-              px: 0.85, py: 0.3, borderRadius: 999,
-              cursor: 'pointer',
-              '&:hover': { bgcolor: c.bg.elevated },
-            }}>
-            <HistoryRounded sx={{ fontSize: 12 }} />
-            History
-          </Box>
-        </Box>
-      )}
       <MotionBox
         ref={containerRef}
         layout

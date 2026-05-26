@@ -24,11 +24,29 @@ const stripFramerProps = (props: any) => {
   return out;
 };
 
+// Components that drive position via `animate={{ x, y }}` (ACPopup, ACMultiChoice, etc.) would otherwise lose their layout when the animate prop is stripped, because they have no fallback style.transform. We salvage the latest numeric x/y from animate and apply them as a transform so the div lands in the right place; no animation, just static placement.
 const motionShim: any = new Proxy({}, {
   get: (_target, tag: string) => {
-    return React.forwardRef((props: any, ref: any) =>
-      React.createElement(tag, { ...stripFramerProps(props), ref })
-    );
+    return React.forwardRef((props: any, ref: any) => {
+      let translate = '';
+      const a = props.animate;
+      if (a && typeof a === 'object' && !Array.isArray(a)) {
+        const ax = typeof a.x === 'number' ? a.x : null;
+        const ay = typeof a.y === 'number' ? a.y : null;
+        if (ax !== null || ay !== null) {
+          translate = `translate(${ax ?? 0}px, ${ay ?? 0}px)`;
+        }
+      }
+      const stripped = stripFramerProps(props);
+      if (translate) {
+        const existing = stripped.style && stripped.style.transform;
+        stripped.style = {
+          ...(stripped.style || {}),
+          transform: existing ? `${existing} ${translate}` : translate,
+        };
+      }
+      return React.createElement(tag, { ...stripped, ref });
+    });
   },
 });
 

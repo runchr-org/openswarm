@@ -8,7 +8,7 @@ import React, {
 import { createPortal } from 'react-dom';
 import { motion, useAnimationControls, AnimatePresence } from '../_motionWin';
 import { useClaudeTokens } from '@/shared/styles/ThemeContext';
-import { cursorStore } from './cursorStore';
+import { cursorStore, useCursorPosition } from './cursorStore';
 import { resolveSelector } from '../selectors';
 import ACPopup from './ACPopup';
 import ACMultiChoice from './ACMultiChoice';
@@ -53,9 +53,13 @@ interface MultiChoiceState {
 // Snappy 260/26 spring; calm comes from popup cadence + 3s dwell, not cursor delay.
 const SPRING = { type: 'spring' as const, stiffness: 260, damping: 26 };
 
+// On Windows the motionWin shim strips Framer Motion's animate prop, so controls.set({x,y}) never moves the wrapper. We bypass by reading the same store the popups read and applying style.transform directly; Mac is unaffected since Framer's own transform writes win the cascade.
+const IS_WIN = typeof navigator !== 'undefined' && navigator.userAgent.includes('Windows');
+
 const AgenticCursor = forwardRef<AgenticCursorHandle>((_props, ref) => {
   const c = useClaudeTokens();
   const controls = useAnimationControls();
+  const storePos = useCursorPosition();
   const posRef = useRef({ x: 0, y: 0 });
   const [visible, setVisible] = useState(false);
   const [popup, setPopup] = useState<PopupState | null>(null);
@@ -255,6 +259,7 @@ const AgenticCursor = forwardRef<AgenticCursorHandle>((_props, ref) => {
           zIndex: 10500,
           pointerEvents: 'none',
           transformOrigin: 'top left',
+          ...(IS_WIN ? { transform: `translate(${storePos.x}px, ${storePos.y}px)` } : null),
         }}
       >
         {visible && (

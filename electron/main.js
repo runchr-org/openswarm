@@ -1105,7 +1105,8 @@ app.whenReady().then(async () => {
 
   // Strip X-Frame-Options and CSP frame-ancestors directives on iframe subframe loads so the Windows BrowserCard iframe fallback (used because <webview> tag commit segfaults on Chromium 144 + this Electron 40 CastLabs build) can render sites that normally refuse to be embedded. Scoped to types:['sub_frame'] so OAuth popups, the main app frame, deep-link redirects, and DRM license fetches keep their security headers intact. urls filter limits to http/https so file:// loads of the bundled frontend are untouched.
   session.defaultSession.webRequest.onHeadersReceived(
-    { urls: ['http://*/*', 'https://*/*'], types: ['sub_frame'] },
+    // Electron's webRequest type name for iframes is 'subFrame' (camelCase), not the Chrome-extension 'sub_frame' — passing the wrong name throws "Invalid type sub_frame" synchronously which becomes an unhandledRejection and prevents the app from booting.
+    { urls: ['http://*/*', 'https://*/*'], types: ['subFrame'] },
     (details, callback) => {
       const headers = { ...(details.responseHeaders || {}) };
       for (const k of Object.keys(headers)) {

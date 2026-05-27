@@ -40,6 +40,7 @@ function main() {
     ['code-signing state', 'verify-signature.js', [...(args.app ? ['--target', args.app] : []), ...(args.requireSigned ? ['--require-signed'] : [])]],
     ['resilience (locked-port + multi-instance)', 'verify-resilience.js', appArg],
     ['network / auth / 9router', 'verify-network.js', [...appArg, ...(args.strict ? ['--strict'] : [])]],
+    ['real agent turn (opt-in: OPENSWARM_E2E_AGENT=1)', 'verify-agent-turn.js', appArg],
   ];
 
   const results = steps.map(([label, script, extra]) => [label, run(label, script, extra)]);

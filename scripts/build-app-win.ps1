@@ -10,11 +10,19 @@
 [CmdletBinding()]
 param(
     [switch]$Sign,
-    [switch]$Publish
+    [switch]$Publish,
+    # Phase 7 A/B: build a Squirrel.Windows installer instead of the default
+    # NSIS one, from the SAME staged tree / SAME commit. Opt-in only; NSIS stays
+    # the default and shipped target until Squirrel is proven faster AND its
+    # rollback works on real Win 10/11 machines. EXPERIMENTAL / unverified in CI.
+    [switch]$Squirrel
 )
 
 $ErrorActionPreference = 'Stop'
 if ($Publish) { $Sign = $true }
+# Override only the win target; everything else (signing hook, extraResources,
+# publish config) merges from electron/package.json's build block unchanged.
+$TargetOverride = if ($Squirrel) { @('--config.win.target=squirrel') } else { @() }
 
 $ScriptDir   = Split-Path -Parent $PSCommandPath
 $ProjectRoot = Split-Path -Parent $ScriptDir
@@ -71,8 +79,13 @@ New-Item -ItemType Directory -Force -Path $UvBinDir | Out-Null
 $NeedUv = -not (Test-Path (Join-Path $UvBinDir 'uv.exe')) -or `
           -not (Test-Path (Join-Path $UvBinDir 'uvx.exe'))
 if ($NeedUv) {
-    Write-Host "[0] Downloading uv + uvx for Windows..."
-    $UvUrl = 'https://github.com/astral-sh/uv/releases/latest/download/uv-x86_64-pc-windows-msvc.zip'
+    # Pinned uv version. "latest" used to mean a fresh uv could appear in any
+    # build with zero warning, breaking reproducibility (pillar 3). Override
+    # with $env:UV_VERSION when deliberately bumping; keep mac (build-app.sh)
+    # in lockstep. 0.11.16 is what "latest" resolved to when this was pinned.
+    $UvVersion = if ($env:UV_VERSION) { $env:UV_VERSION } else { '0.11.16' }
+    Write-Host "[0] Downloading uv + uvx $UvVersion for Windows..."
+    $UvUrl = "https://github.com/astral-sh/uv/releases/download/$UvVersion/uv-x86_64-pc-windows-msvc.zip"
     $TmpZip = Join-Path $env:TEMP "uv-win-$([guid]::NewGuid()).zip"
     $TmpExtract = Join-Path $env:TEMP "uv-win-extract-$([guid]::NewGuid())"
     try {
@@ -235,8 +248,11 @@ Write-Host ""
 Write-Host "[1/5] Building frontend..."
 Push-Location (Join-Path $ProjectRoot 'frontend')
 try {
-    & npm install
-    if ($LASTEXITCODE -ne 0) { throw "npm install (frontend) failed" }
+    # npm ci (not install): installs exactly what package-lock.json pins, never
+    # silently mutates the lock, fails loudly on drift. Reproducible builds
+    # (pillar 3) depend on the lock being boss.
+    & npm ci
+    if ($LASTEXITCODE -ne 0) { throw "npm ci (frontend) failed" }
     & npm run build
     if ($LASTEXITCODE -ne 0) { throw "frontend build failed" }
 } finally { Pop-Location }
@@ -396,12 +412,32 @@ Write-Host "  Safe to modify your codebase now.     " -BackgroundColor Green -Fo
 Write-Host "========================================" -BackgroundColor Green -ForegroundColor White
 Write-Host ""
 
+# --- Provenance stamp ---
+# Record the exact commit this artifact was built from. electron\build-info.json
+# ships inside the asar; main.js reads it for the startup [provenance] log line
+# and the About panel. Gitignored + regenerated each build.
+$BuildSha = (git -C $ProjectRoot rev-parse HEAD 2>$null)
+if (-not $BuildSha) { $BuildSha = 'unknown' }
+$BuildVersion = (Get-Content -Raw (Join-Path $ProjectRoot 'electron\package.json') | ConvertFrom-Json).version
+$BuildChannel = if ($BuildVersion -match '-') { 'experimental' } else { 'stable' }
+$BuildShortSha = if ($BuildSha.Length -ge 12) { $BuildSha.Substring(0, 12) } else { $BuildSha }
+$BuildInfo = [ordered]@{
+    sha      = $BuildSha
+    shortSha = $BuildShortSha
+    builtAt  = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
+    channel  = $BuildChannel
+    version  = $BuildVersion
+}
+$BuildInfo | ConvertTo-Json -Compress | Set-Content -Path (Join-Path $ProjectRoot 'electron\build-info.json') -Encoding utf8
+Write-Host "Stamped build-info.json: sha=$BuildShortSha channel=$BuildChannel"
+
 # --- Step 5: Package with electron-builder ---
 Write-Host "[5/5] Packaging with electron-builder..."
 Push-Location (Join-Path $ProjectRoot 'electron')
 try {
-    & npm install
-    if ($LASTEXITCODE -ne 0) { throw "npm install (electron) failed" }
+    # npm ci: lockfile-exact, no drift. See frontend note above.
+    & npm ci
+    if ($LASTEXITCODE -ne 0) { throw "npm ci (electron) failed" }
 
     if (-not $Sign) {
         $env:CSC_IDENTITY_AUTO_DISCOVERY = 'false'
@@ -431,9 +467,9 @@ try {
             Write-Host "  -> Continuing in 8s. Press Ctrl+C to abort." -ForegroundColor Yellow
             Start-Sleep -Seconds 8
         }
-        & npx electron-builder --win --x64 --publish always
+        & npx electron-builder --win --x64 @TargetOverride --publish always
     } else {
-        & npx electron-builder --win --x64 --publish never
+        & npx electron-builder --win --x64 @TargetOverride --publish never
     }
     if ($LASTEXITCODE -ne 0) { throw "electron-builder failed" }
 } finally { Pop-Location }

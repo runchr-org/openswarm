@@ -133,6 +133,29 @@ function parsePerfMarks(log) {
   return marks;
 }
 
+// Pure verdict on a backend.log: the log-based half of the boot check (provenance
+// matches HEAD, the three perf marks exist, are ordered, and are not degenerate).
+// Kept pure + exported so it can be mutation-tested (selftest-gate.js feeds it
+// crafted broken logs and proves each guard fires) without launching the app.
+// Returns { failures: string[], sha, marks }; empty failures == the log half passed.
+function bootFailures({ log, headShort } = {}) {
+  const failures = [];
+  const sha = parseProvenanceSha(log || '');
+  if (!sha) failures.push('no [provenance] line in backend.log');
+  else if (headShort && sha !== headShort) failures.push(`provenance sha ${sha} != git HEAD ${headShort}`);
+
+  const marks = parsePerfMarks(log || '');
+  const missing = ['app-launch', 'first-paint', 'backend-http-ready'].filter((k) => !(k in marks));
+  if (missing.length) missing.forEach((k) => failures.push(`missing [perf] ${k}`));
+  else {
+    if (!(marks['app-launch'] <= marks['first-paint'] && marks['first-paint'] <= marks['backend-http-ready'])) {
+      failures.push(`[perf] marks out of order: ${JSON.stringify(marks)}`);
+    }
+    if (!(marks['backend-http-ready'] > 0)) failures.push('[perf] backend-http-ready not > 0 (degenerate marks)');
+  }
+  return { failures, sha, marks };
+}
+
 // Launch the app and poll its backend.log until it reports HTTP-ready (or time out).
 // Returns { child, log, port }. Caller is responsible for killApp(child).
 async function launchAndWait({ appPath, timeoutMs = 180000, freshLog = true } = {}) {
@@ -175,5 +198,6 @@ module.exports = {
   attachToRunning,
   parseProvenanceSha,
   parsePerfMarks,
+  bootFailures,
   launchAndWait,
 };

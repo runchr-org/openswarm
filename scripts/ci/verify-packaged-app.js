@@ -41,16 +41,9 @@ async function main() {
   child = res.child;
   const { log, port } = res;
 
-  // --- assertions ---
-  const provSha = h.parseProvenanceSha(log);
-  if (!provSha) fail('no [provenance] line in backend.log (app may not have booted)');
-  if (headShort && provSha !== headShort) fail(`provenance sha ${provSha} != git HEAD ${headShort}`);
-
-  const marks = h.parsePerfMarks(log);
-  for (const k of ['app-launch', 'first-paint', 'backend-http-ready']) if (!(k in marks)) fail(`missing [perf] ${k} in backend.log`);
-  if (!(marks['app-launch'] <= marks['first-paint'] && marks['first-paint'] <= marks['backend-http-ready'])) {
-    fail(`[perf] marks out of order: ${JSON.stringify(marks)}`);
-  }
+  // --- assertions (log half is pure + mutation-tested in selftest-gate.js) ---
+  const { failures, sha: provSha, marks } = h.bootFailures({ log, headShort });
+  if (failures.length) fail(failures.join('; '));
 
   if (port) {
     let code = 0;

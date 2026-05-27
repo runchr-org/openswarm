@@ -6,6 +6,8 @@ name: E2E (packaged app, mac + win)
 # release-windows.yml / release-macos.yml.
 
 on:
+  push:
+    branches: [eric/lock]
   pull_request:
   workflow_dispatch:
 

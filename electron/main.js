@@ -35,6 +35,21 @@ const getPort = require('get-port');
 const http = require('http');
 const affiliateTracking = require('./affiliateTracking');
 
+// Phase 0 boot instrumentation. Records four ordered milestones as parseable
+// lines so the packaged-build timing test (and any future perf-regression
+// gate) can read them straight out of backend.log without a separate file.
+// Format is load-bearing: `[perf] <name> t=<ms-since-launch>` one per line.
+// APP_LAUNCH_T is captured at module load so t=0 is genuinely process start.
+const APP_LAUNCH_T = Date.now();
+const _perfSeen = new Set();
+function perfMark(name) {
+  // One-shot per milestone: first-paint etc. can re-fire on crash-recovery
+  // window recreation, but the baseline we care about is the cold boot.
+  if (_perfSeen.has(name)) return;
+  _perfSeen.add(name);
+  try { console.log(`[perf] ${name} t=${Date.now() - APP_LAUNCH_T}`); } catch (_) {}
+}
+
 // Defender warmup: NSIS runs us with --prewarm right after install so Windows scans the bundled binaries while the user is already watching the installer instead of staring at a slow first launch.
 if (process.argv.includes('--prewarm') && process.platform === 'win32') {
   const touchExe = (rel) => {
@@ -639,6 +654,16 @@ async function startBackend() {
   }
 
   openBackendLog();
+  // app-launch is the first milestone that can reach backend.log, since the
+  // console tee is installed by openBackendLog() just above. APP_LAUNCH_T
+  // (module load) remains the t=0 reference, so this t is real elapsed.
+  perfMark('app-launch');
+  // Provenance: name the exact commit + version at the top of every boot trace,
+  // so a user-submitted backend.log instantly says what shipped. Emitted here
+  // (not in whenReady) because openBackendLog() above just installed the console
+  // tee; logging earlier would miss the persistent file.
+  const _bi = getBuildInfo();
+  console.log(`[provenance] OpenSwarm ${app.getVersion()} sha=${_bi.shortSha} channel=${_bi.channel} builtAt=${_bi.builtAt || 'n/a'}`);
   // Record what we're about to launch and whether the interpreter is even
   // present. If AV quarantined python.exe or the wrong-arch bundle shipped,
   // exists=false (or spawn 'error' below) names the cause that otherwise
@@ -704,6 +729,7 @@ async function startBackend() {
 
   emitSplashStatus('Starting backend…');
   await waitForBackend(backendPort, { process: backendProcess });
+  perfMark('backend-http-ready');
   console.log(`Backend ready on port ${backendPort}`);
 
   // Backend writes a per-install auth token file at startup. Read it
@@ -881,6 +907,7 @@ function createWindow() {
   // the window existed (cold-launch via openswarm://). pendingDeepLink may
   // be a string (legacy) OR a {channel, url} object (v1.0.26+ OAuth claims).
   mainWindow.webContents.once('did-finish-load', () => {
+    perfMark('first-paint');
     if (pendingDeepLink) {
       if (typeof pendingDeepLink === 'string') {
         mainWindow.webContents.send('openswarm:auth-url', pendingDeepLink);
@@ -1032,6 +1059,47 @@ function sendToRenderer(channel, ...args) {
   }
 }
 
+// Maps a raw electron-updater error to a short, human message. The raw error
+// is always logged separately for debugging; users only ever see this. No
+// em/en dashes per repo style.
+function friendlyUpdateError(err) {
+  const raw = ((err && err.message) || String(err) || '').toLowerCase();
+  // Experimental on, but there is no pre-release to fetch: the provider 404s
+  // looking for the pre-release channel feed. This is the screenshot case.
+  if (autoUpdater && autoUpdater.allowPrerelease &&
+      /404|not found|cannot find|no published|latest.*\.yml/.test(raw)) {
+    return 'No experimental builds available right now. You are on the latest version.';
+  }
+  if (/net::|enotfound|etimedout|econnrefused|getaddrinfo|network/.test(raw)) {
+    return 'Could not reach the update server. Check your connection and try again.';
+  }
+  return 'Update check failed. Please try again later.';
+}
+
+// Phase 2 provenance: which exact commit produced this build. The build
+// scripts write electron/build-info.json (gitignored, regenerated each build)
+// next to main.js, so it ships inside the asar. In dev there is no such file,
+// so we fall back to a live `git rev-parse` and tag it dev. Cached after first
+// read; never throws (a missing/garbled file just yields 'unknown').
+let _buildInfoCache = null;
+function getBuildInfo() {
+  if (_buildInfoCache) return _buildInfoCache;
+  let info = { sha: 'unknown', shortSha: 'unknown', builtAt: null, channel: 'unknown' };
+  try {
+    const raw = fs.readFileSync(path.join(__dirname, 'build-info.json'), 'utf8');
+    const parsed = JSON.parse(raw);
+    if (parsed && parsed.sha) info = parsed;
+  } catch (_) {
+    // Dev fallback: resolve the working-tree HEAD so `npm start` still reports something useful.
+    try {
+      const sha = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: __dirname, timeout: 2000 }).toString().trim();
+      if (sha) info = { sha, shortSha: sha.slice(0, 12), builtAt: null, channel: 'dev' };
+    } catch (_) { /* not a git checkout either; keep 'unknown' */ }
+  }
+  _buildInfoCache = info;
+  return info;
+}
+
 function setupAutoUpdater() {
   if (!autoUpdater) return;
   // Silent background updates: download on detect, install on next quit.
@@ -1068,9 +1136,15 @@ function setupAutoUpdater() {
   });
 
   autoUpdater.on('error', (err) => {
+    // Raw electron-updater errors are verbose (full URL, HTTP status, stack,
+    // sometimes an HTML body). Keep the raw text in the log for debugging, but
+    // never show it to the user. The common case is "Experimental updates is on
+    // but no pre-release exists": the GitHub provider 404s hunting a pre-release
+    // feed, which is not a real failure, just "nothing newer to install".
     console.error('Auto-update error:', err);
-    cachedUpdateStatus = { status: 'error', info: null, error: err?.message || String(err) };
-    sendToRenderer('update-error', err?.message || String(err));
+    const friendly = friendlyUpdateError(err);
+    cachedUpdateStatus = { status: 'error', info: null, error: friendly };
+    sendToRenderer('update-error', friendly);
   });
 
   autoUpdater.checkForUpdates().catch((err) => {
@@ -1702,7 +1776,16 @@ ipcMain.handle('get-auth-token', async () => {
   } catch (_) {}
   return authToken;
 });
+// Phase 0: renderer fires this once, when it renders the first streamed token
+// of the first agent response. Main owns the timing log (backend.log), so the
+// renderer reports the event and we stamp it against the same APP_LAUNCH_T as
+// the other milestones. Idempotent via perfMark's one-shot guard.
+ipcMain.on('perf:first-agent-response', () => perfMark('first-agent-response'));
+
 ipcMain.handle('get-app-version', () => app.getVersion());
+// Phase 2 provenance: the renderer's About panel shows the commit this build
+// was cut from, so a screenshot is enough to identify the exact code shipped.
+ipcMain.handle('get-build-info', () => getBuildInfo());
 ipcMain.handle('get-webview-preload-path', () => {
   return `file://${path.join(__dirname, 'webview-preload.js')}`;
 });

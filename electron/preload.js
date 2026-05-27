@@ -24,6 +24,14 @@ contextBridge.exposeInMainWorld('openswarm', {
   getAuthToken: () => ipcRenderer.invoke('get-auth-token'),
 
   getAppVersion: () => ipcRenderer.invoke('get-app-version'),
+
+  // Phase 2 provenance: { sha, shortSha, builtAt, channel } for the About panel.
+  getBuildInfo: () => ipcRenderer.invoke('get-build-info'),
+
+  // Phase 0 boot instrumentation: renderer calls this exactly once, when the
+  // first streamed token of the first agent response paints. Fire-and-forget
+  // (send, not invoke) so it never blocks the render path. Main dedupes.
+  markFirstAgentResponse: () => ipcRenderer.send('perf:first-agent-response'),
   openExternal: (url) => ipcRenderer.invoke('open-external', url),
 
   // Returns the persisted install state (app_install_id, ref, ...).

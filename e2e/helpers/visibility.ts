@@ -29,6 +29,14 @@ export interface VisibilityHandle {
   dir: string;
   recordAction<T>(name: string, fn: () => Promise<T>): Promise<T>;
   mark(label: string, payload?: Record<string, unknown>): void;
+  // Capture an a11y tree snapshot at a labeled moment (key surfaces).
+  snapshotA11y(label: string): Promise<void>;
+  // Trigger a heap snapshot mid-run (for memory leak hunts).
+  snapshotHeap(label: string): Promise<void>;
+  // Dump the failure context for a specific test (call from afterEach when
+  // info.status === 'failed'): writes the recent event tail, the current
+  // Redux state, and a final screenshot under dir/failures/<test>.
+  recordFailure(testTitle: string, status: string, error?: string): Promise<void>;
   stop(): Promise<void>;
 }
 
@@ -42,16 +50,92 @@ function safeName(s: string): string {
   return s.replace(/[^a-z0-9._-]+/gi, '_').slice(0, 120);
 }
 
+// Compact view of a Redux state: top-level slice keys + array lengths +
+// truncated previews. Avoids dumping 100s of KB while still telling you
+// "agents.sessions had 3 entries, settings.loaded was false."
+function summarizeRedux(state: unknown): unknown {
+  if (!state || typeof state !== 'object') return state;
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(state as Record<string, unknown>)) {
+    if (v == null) out[k] = null;
+    else if (Array.isArray(v)) out[k] = { type: 'array', length: v.length };
+    else if (typeof v === 'object') out[k] = { type: 'object', keys: Object.keys(v as object).slice(0, 20) };
+    else out[k] = { type: typeof v, preview: String(v).slice(0, 80) };
+  }
+  return out;
+}
+
 // Renderer-side instrumentation. Runs in EVERY frame of the app before any
 // page script, captures mousemove/wheel/keydown with high-res timestamps,
 // and forwards to the test side via window.__visibility_log__ which the test
 // reads on a poll. No frontend code changes; this is test-only init script.
 const INIT_SCRIPT = `
 (() => {
+  // Set BEFORE any bundle code runs so frontend code that gates on this flag
+  // (e.g. store.ts exposing the Redux store) sees it during module load.
+  (window).__OPENSWARM_E2E__ = true;
   if ((window).__visibility_installed__) return;
   (window).__visibility_installed__ = true;
   const buf = [];
   (window).__visibility_drain__ = () => { const out = buf.splice(0); return out; };
+
+  // Redux state diffs: subscribe once the store is exposed, push a shallow
+  // top-level slice-key diff each time. Full state can be 100s of KB; logging
+  // every dispatch flat would saturate the JSONL. We log shallow changes only.
+  const installReduxHook = () => {
+    const s = (window).__OPENSWARM_STORE__;
+    if (!s) return false;
+    let prev = s.getState();
+    s.subscribe(() => {
+      const next = s.getState();
+      const changed = [];
+      for (const k of Object.keys(next)) {
+        if (next[k] !== prev[k]) changed.push(k);
+      }
+      if (changed.length) buf.push({ ts: performance.now(), kind: 'redux', payload: { slices: changed } });
+      prev = next;
+    });
+    return true;
+  };
+  if (!installReduxHook()) {
+    // Bundle hasn't created the store yet; poll briefly.
+    let tries = 0;
+    const id = setInterval(() => { if (installReduxHook() || ++tries > 200) clearInterval(id); }, 50);
+  }
+
+  // IPC bridge instrumentation. The preload exposes window.openswarm; we wrap
+  // every function so each invoke is timestamped with args+result. Avoids any
+  // production preload change.
+  const installIpcHook = () => {
+    const api = (window).openswarm;
+    if (!api || api.__ipc_wrapped__) return false;
+    for (const key of Object.keys(api)) {
+      const orig = api[key];
+      if (typeof orig !== 'function') continue;
+      api[key] = function(...args) {
+        const t0 = performance.now();
+        let r;
+        try { r = orig.apply(api, args); } catch (e) {
+          buf.push({ ts: performance.now(), kind: 'ipc-throw', payload: { name: key, durationMs: performance.now() - t0, error: String(e) } });
+          throw e;
+        }
+        if (r && typeof r.then === 'function') {
+          return r.then(
+            (v) => { buf.push({ ts: performance.now(), kind: 'ipc', payload: { name: key, durationMs: performance.now() - t0, ok: true } }); return v; },
+            (e) => { buf.push({ ts: performance.now(), kind: 'ipc', payload: { name: key, durationMs: performance.now() - t0, ok: false, error: String(e) } }); throw e; },
+          );
+        }
+        buf.push({ ts: performance.now(), kind: 'ipc', payload: { name: key, durationMs: performance.now() - t0, ok: true, sync: true } });
+        return r;
+      };
+    }
+    api.__ipc_wrapped__ = true;
+    return true;
+  };
+  if (!installIpcHook()) {
+    let tries = 0;
+    const id = setInterval(() => { if (installIpcHook() || ++tries > 200) clearInterval(id); }, 50);
+  }
   const push = (kind, payload) => {
     try { buf.push({ ts: performance.now(), kind, payload }); }
     catch (e) { /* never throw out of an event listener */ }
@@ -113,10 +197,38 @@ export async function startVisibility(
   const ctx = app.context();
   await ctx.tracing.start({ screenshots: true, snapshots: true, sources: true, title: testId });
 
-  // 2) Renderer-side hooks for input timing + long tasks.
+  // 2) Renderer-side hooks: input timing, long tasks, Redux subscribe, IPC wrap.
+  //    The init script runs on every NEW page; we also eval against the current
+  //    page so the already-open main window picks it up.
   await ctx.addInitScript({ content: INIT_SCRIPT });
-  // Inject into the already-open main page too (init scripts only fire on new pages).
   await page.evaluate(INIT_SCRIPT).catch(() => { /* page may be navigating */ });
+
+  // 3) JS + CSS coverage. Chromium-only on Playwright. Saved at stop.
+  try { await page.coverage.startJSCoverage({ resetOnNavigation: false }); } catch (e) { log('coverage-skip', { reason: 'js', error: String(e) }); }
+  try { await page.coverage.startCSSCoverage({ resetOnNavigation: false }); } catch (e) { log('coverage-skip', { reason: 'css', error: String(e) }); }
+
+  // 4) Chromium perf tracing via CDP. Categories chosen to capture paint /
+  //    layout / scripting / raf cadence without exploding trace size.
+  const cdp = await ctx.newCDPSession(page).catch(() => null);
+  let tracingActive = false;
+  if (cdp) {
+    try {
+      await cdp.send('Tracing.start', {
+        categories: 'devtools.timeline,disabled-by-default-devtools.timeline.frame,blink.user_timing,latencyInfo,toplevel',
+        transferMode: 'ReturnAsStream',
+      });
+      tracingActive = true;
+    } catch (e) { log('cdp-tracing-skip', { error: String(e) }); }
+  }
+
+  // 5) Electron main-process stdout/stderr piped into the unified stream.
+  //    Catches main-process crashes and Electron-internal warnings that never
+  //    reach the renderer log.
+  try {
+    const proc: any = (app as any).process?.();
+    proc?.stdout?.on?.('data', (b: Buffer) => log('main-stdout', String(b).slice(0, 800)));
+    proc?.stderr?.on?.('data', (b: Buffer) => log('main-stderr', String(b).slice(0, 800)));
+  } catch (e) { log('main-pipe-skip', { error: String(e) }); }
 
   // 3) Page-level event listeners. Console + errors + every network round-trip.
   page.on('console', (m) => log('console', { type: m.type(), text: m.text(), location: m.location() }));
@@ -193,10 +305,91 @@ export async function startVisibility(
       }
     },
     mark(label, payload) { log('mark', { label, ...(payload || {}) }); },
+    async snapshotA11y(label) {
+      try {
+        const snap = await page.accessibility.snapshot({ interestingOnly: true });
+        const p = path.join(dir, `a11y-${safeName(label)}.json`);
+        fs.writeFileSync(p, JSON.stringify(snap, null, 2));
+        log('a11y-snapshot', { label, path: p });
+      } catch (e) { log('a11y-snapshot-skip', { label, error: String(e) }); }
+    },
+    async recordFailure(testTitle, status, error) {
+      const failDir = path.join(dir, 'failures');
+      fs.mkdirSync(failDir, { recursive: true });
+      const base = path.join(failDir, safeName(testTitle));
+      // Take a final screenshot for visual context.
+      try { await page.screenshot({ path: `${base}.png`, fullPage: true }); }
+      catch (e) { log('failure-screenshot-skip', { error: String(e) }); }
+      // Pull current Redux state if available - tells us the slice that was
+      // wrong at the moment of failure.
+      let reduxState: unknown = null;
+      try { reduxState = await page.evaluate(() => (window as any).__OPENSWARM_STORE__?.getState?.() ?? null); }
+      catch (e) { reduxState = { error: String(e) }; }
+      // Read the tail of events.jsonl as the action breadcrumb. The user reads
+      // this top-down to localize the failure to a step.
+      let eventTail = '';
+      try {
+        const stat = fs.statSync(eventsPath);
+        const fd = fs.openSync(eventsPath, 'r');
+        const tailSize = Math.min(stat.size, 256 * 1024);
+        const buf = Buffer.alloc(tailSize);
+        fs.readSync(fd, buf, 0, tailSize, stat.size - tailSize);
+        fs.closeSync(fd);
+        eventTail = buf.toString('utf8');
+      } catch (e) { eventTail = `(events tail read failed: ${String(e)})`; }
+      fs.writeFileSync(`${base}.json`, JSON.stringify({
+        test: testTitle,
+        status,
+        error: error || null,
+        atMs: Date.now(),
+        reduxStateSummary: summarizeRedux(reduxState),
+        eventTailLines: eventTail.split(/\r?\n/).slice(-200),
+      }, null, 2));
+      log('failure-report', { test: testTitle, status, path: `${base}.json` });
+    },
+    async snapshotHeap(label) {
+      if (!cdp) { log('heap-skip', { label, reason: 'no cdp' }); return; }
+      try {
+        // CDP HeapProfiler.takeHeapSnapshot streams chunks via event.
+        const chunks: string[] = [];
+        const onChunk = (e: any) => chunks.push(e.chunk);
+        cdp.on('HeapProfiler.addHeapSnapshotChunk' as any, onChunk);
+        await cdp.send('HeapProfiler.takeHeapSnapshot' as any, { reportProgress: false } as any);
+        cdp.off('HeapProfiler.addHeapSnapshotChunk' as any, onChunk);
+        const p = path.join(dir, `heap-${safeName(label)}.heapsnapshot`);
+        fs.writeFileSync(p, chunks.join(''));
+        log('heap-snapshot', { label, path: p, sizeBytes: chunks.join('').length });
+      } catch (e) { log('heap-snapshot-skip', { label, error: String(e) }); }
+    },
     async stop() {
       log('stop', {});
       clearInterval(backendTimer);
       clearInterval(drainTimer);
+      // Flush JS/CSS coverage before tracing stops (Playwright requires it).
+      try {
+        const js = await page.coverage.stopJSCoverage();
+        fs.writeFileSync(path.join(dir, 'coverage-js.json'), JSON.stringify(js));
+      } catch (e) { log('coverage-stop-skip', { reason: 'js', error: String(e) }); }
+      try {
+        const css = await page.coverage.stopCSSCoverage();
+        fs.writeFileSync(path.join(dir, 'coverage-css.json'), JSON.stringify(css));
+      } catch (e) { log('coverage-stop-skip', { reason: 'css', error: String(e) }); }
+      // Stop CDP Chromium tracing and drain stream to disk.
+      if (cdp && tracingActive) {
+        try {
+          const result: any = await cdp.send('Tracing.end' as any);
+          if (result?.stream) {
+            const out = fs.createWriteStream(path.join(dir, 'chromium-trace.json'));
+            for (;;) {
+              const piece: any = await cdp.send('IO.read' as any, { handle: result.stream, size: 64 * 1024 } as any);
+              if (piece?.data) out.write(piece.data);
+              if (piece?.eof) break;
+            }
+            await new Promise<void>((r) => out.end(() => r()));
+            await cdp.send('IO.close' as any, { handle: result.stream } as any).catch(() => {});
+          }
+        } catch (e) { log('cdp-tracing-stop-skip', { error: String(e) }); }
+      }
       try { await ctx.tracing.stop({ path: path.join(dir, 'playwright-trace.zip') }); } catch {}
       await new Promise<void>((r) => eventsStream.end(() => r()));
       await new Promise<void>((r) => mouseStream.end(() => r()));

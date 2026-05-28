@@ -69,7 +69,23 @@ check('parseFeed reads files[0].size as number', parsed.files[0].size === 12345)
 check('parseFeed reads top-level path + sha512', parsed.top.path === 'Setup.exe' && parsed.top.sha512 === 'AAA==');
 check('parseFeed returns no files on a feed missing the list', uf.parseFeed('version: 1.0.0\n').files.length === 0);
 
-process.stdout.write(failed
-  ? `\nGATE SELFTEST FAIL: ${failed} guard(s) did not discriminate - the gate has theater in it.\n`
-  : '\nGATE SELFTEST PASS: every boot guard fires on a break and passes on good input.\n');
-process.exit(failed ? 1 : 0);
+process.stdout.write('\npreflight mutation tests (cross-gate: if withTimeout regresses to fail-on-hang, the boot pipeline gate also fails):\n');
+const pf = require('../../electron/preflight');
+(async () => {
+  // Hang fuzz: a never-resolving fn must yield status=warn within timeoutMs+50ms.
+  const t0 = Date.now();
+  const w = await pf.withTimeout('sentinel-hang', () => new Promise(() => {}), 100);
+  const dt = Date.now() - t0;
+  check('withTimeout: hung fn -> warn (NOT fail)', w.status === 'warn');
+  check('withTimeout: hung fn returns within budget+slack', dt < 200);
+  // Sync throws inside the fn must still produce warn, not crash the gate.
+  const t = await pf.withTimeout('sentinel-throw', () => { throw new Error('boom'); }, 500);
+  check('withTimeout: thrown fn -> warn', t.status === 'warn');
+  check('withTimeout: thrown fn reason carries the message', /boom/.test(t.reason));
+  // Cache version-key invariant: any drift here would silently skip preflight on a version mismatch.
+  const env = { fs: { readFileSync: () => JSON.stringify({ appVersion: '2.0.0', verdict: 'ok' }) } };
+  check('readCache: version mismatch -> null (no stale skip)', pf.readCache(env, '/x', '1.0.0') === null);
+  if (failed === 0) process.stdout.write('\nGATE SELFTEST PASS: every boot guard fires on a break and passes on good input.\n');
+  else process.stdout.write(`\nGATE SELFTEST FAIL: ${failed} guard(s) did not discriminate - the gate has theater in it.\n`);
+  process.exit(failed ? 1 : 0);
+})();

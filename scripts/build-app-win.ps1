@@ -443,7 +443,7 @@ try {
         # and locale-pak filtering still run during the pack phase, so the produced
         # win-unpacked\OpenSwarm.exe is fully functional; only the NSIS installer +
         # update feed are skipped (verify-update-feed skips cleanly when absent).
-        & npx electron-builder --win --x64 --dir @TargetOverride --publish never
+        & npx electron-builder --win --x64 --dir $TargetOverride --publish never
     } elseif ($Publish) {
         # Safety check: warn if the matching Mac release isn't on GitHub yet.
         # Mac and Windows publishes don't conflict (different asset names,
@@ -468,9 +468,9 @@ try {
             Write-Host "  -> Continuing in 8s. Press Ctrl+C to abort." -ForegroundColor Yellow
             Start-Sleep -Seconds 8
         }
-        & npx electron-builder --win --x64 @TargetOverride --publish always
+        & npx electron-builder --win --x64 $TargetOverride --publish always
     } else {
-        & npx electron-builder --win --x64 @TargetOverride --publish never
+        & npx electron-builder --win --x64 $TargetOverride --publish never
     }
     if ($LASTEXITCODE -ne 0) { throw "electron-builder failed" }
 } finally { Pop-Location }

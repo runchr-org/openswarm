@@ -22,7 +22,7 @@ on:
   workflow_dispatch:
   push:
     branches:
-      - eric/squirrel-test
+      - squirrel
 
 permissions:
   contents: read

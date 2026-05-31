@@ -149,12 +149,16 @@ jobs:
           } else {
             Write-Host "Version $version is STABLE"
           }
+          # -Squirrel passes --config.win.target=squirrel (string form), which makes
+          # electron-builder honor win.artifactName -> OpenSwarm-Setup-x64.exe. The
+          # object-form win.target in package.json does NOT, and falls back to
+          # openswarm-Setup-1.1.71.exe, which mismatches the landing page + latest.yml.
           if ($shouldPublish) {
             Write-Host "Build mode: PUBLISH"
-            pwsh -NoProfile -File scripts\build-app-win.ps1 -Publish
+            pwsh -NoProfile -File scripts\build-app-win.ps1 -Publish -Squirrel
           } else {
             Write-Host "Build mode: SIGN (artifact only)"
-            pwsh -NoProfile -File scripts\build-app-win.ps1 -Sign
+            pwsh -NoProfile -File scripts\build-app-win.ps1 -Sign -Squirrel
           }
           if ($LASTEXITCODE -ne 0) { throw "build-app-win.ps1 failed ($LASTEXITCODE)" }
 

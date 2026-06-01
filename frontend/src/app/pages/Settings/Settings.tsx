@@ -36,9 +36,11 @@ const PROVIDER_COLORS: Record<string, string> = {
 const OPENSWARM_GRADIENT =
   'linear-gradient(135deg, #8FB3FF 0%, #E56BC4 45%, #FFA85C 100%)';
 
+// Shown only in the brief window before the live model list loads from the
+// backend. Keep the flagship current so the default-model dropdown isn't stale.
 const DEFAULT_MODEL_FALLBACK = [
+  { value: 'opus-4-8', label: 'Claude Opus 4.8' },
   { value: 'sonnet', label: 'Claude Sonnet 4.6' },
-  { value: 'opus', label: 'Claude Opus 4.6' },
   { value: 'haiku', label: 'Claude Haiku 4.5' },
 ];
 
@@ -71,8 +73,18 @@ const Settings: React.FC = () => {
       grouped[prov] = models.map((m) => ({ value: m.value, label: m.label }));
       for (const m of models) flat.push({ value: m.value, label: m.label, provider: prov });
     }
+    // Guarantee the currently-selected default is always a valid option, even if
+    // the live list doesn't carry it (custom/OpenRouter value, or a stored model
+    // not in the current registry). Without this the dropdown gets an MUI
+    // "out-of-range value" warning and renders blank.
+    const sel = settings.default_model;
+    if (sel && !flat.some((m) => m.value === sel)) {
+      const other = 'Other';
+      (grouped[other] ||= []).push({ value: sel, label: sel });
+      flat.push({ value: sel, label: sel, provider: other });
+    }
     return { grouped, flat };
-  }, [modelsByProvider, modelsLoaded, settings.connection_mode]);
+  }, [modelsByProvider, modelsLoaded, settings.connection_mode, settings.default_model]);
 
   const initialTab = useAppSelector((s) => s.settings.initialTab);
   // In-flight edits persisted to Redux so they survive modal close; cleared on save or explicit Discard.

@@ -1227,8 +1227,28 @@ const agentsSlice = createSlice({
       .addCase(fetchSession.fulfilled, (state, action) => {
         const session = action.payload;
         const existing = state.sessions[session.id];
+        // Preserve optimistic-pending messages the server snapshot doesn't carry
+        // yet. On remount mid-stream (leave the chat + come back) this fetch's
+        // snapshot predates the just-sent user turn, so a blind replace wiped the
+        // user's own message bubble while the assistant stream (separate slice)
+        // kept going. Carry forward any local pending message not already echoed
+        // in the snapshot; the WS echo / next fetch dedupes it by client_message_id.
+        const incomingMsgs = session.messages ?? [];
+        const incomingClientIds = new Set(
+          incomingMsgs.map((m) => m.client_message_id).filter(Boolean),
+        );
+        const incomingIds = new Set(incomingMsgs.map((m) => m.id));
+        const survivingOptimistic = (existing?.messages ?? []).filter(
+          (m) =>
+            m.optimistic_status === 'pending' &&
+            !(m.client_message_id && incomingClientIds.has(m.client_message_id)) &&
+            !incomingIds.has(m.id),
+        );
         state.sessions[session.id] = {
           ...session,
+          messages: survivingOptimistic.length
+            ? [...incomingMsgs, ...survivingOptimistic]
+            : incomingMsgs,
           pending_approvals: session.pending_approvals ?? existing?.pending_approvals ?? [],
           tool_group_meta: session.tool_group_meta ?? existing?.tool_group_meta ?? {},
           // mcp_suggestions live in client state only (the backend never

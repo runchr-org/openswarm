@@ -9,6 +9,7 @@ from typing import Any
 import httpx
 
 from backend.apps.agents.tools.base import BaseTool, ToolContext
+from backend.apps.agents.tools.ssrf_guard import SSRFBlocked, safe_fetch
 
 _HTTP_TIMEOUT = 30
 _MAX_OUTPUT_BYTES = 250 * 1024  # ~250 KB covers ~95% of articles/wikis/docs.
@@ -168,13 +169,15 @@ class WebFetchTool(BaseTool):
         prompt: str | None = input_data.get("prompt")
 
         try:
-            async with httpx.AsyncClient(
-                timeout=_HTTP_TIMEOUT,
-                follow_redirects=True,
+            resp = await safe_fetch(
+                url,
+                method="GET",
                 headers={"User-Agent": _USER_AGENT},
-            ) as client:
-                resp = await client.get(url)
-                resp.raise_for_status()
+                timeout=_HTTP_TIMEOUT,
+            )
+            resp.raise_for_status()
+        except SSRFBlocked as exc:
+            return [{"type": "text", "text": f"Refused to fetch {url}: {exc}"}]
         except httpx.HTTPStatusError as exc:
             return [{"type": "text", "text": f"HTTP error {exc.response.status_code} fetching {url}"}]
         except Exception as exc:

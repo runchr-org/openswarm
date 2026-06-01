@@ -503,6 +503,15 @@ async def search(body: SearchBody) -> dict:
 @typechecked
 async def fetch(body: FetchBody) -> dict:
     """Fetch a URL, primary-aware. Mirrors /search cascade logic."""
+    # Belt-and-suspenders: even though we delegate to remote Gemini/OpenAI
+    # fetchers (which can't reach private IPs), validating the URL here means
+    # a private/metadata URL gets a 4xx instead of being silently forwarded.
+    from backend.apps.agents.tools.ssrf_guard import SSRFBlocked, assert_safe_url
+    try:
+        await assert_safe_url(body.url)
+    except SSRFBlocked as exc:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=400, detail=f"Refused: {exc}")
     gemini_key = _resolve_gemini_api_key()
     openai_key = _resolve_openai_api_key()
     primary = (body.primary or "").lower()

@@ -99,6 +99,14 @@ const ToolGroupBubble: React.FC<Props> = React.memo(({ group, isSessionRunning =
         my: 0.5,
         // contain: stops new tool rows from reflowing the whole transcript.
         contain: 'layout style',
+        // Ease in instead of popping when a tool group appears mid-turn.
+        // Transform+opacity only, so it rides the compositor and never nudges
+        // layout or the scroll position. No streaming twin, so no handoff flash.
+        animation: 'toolGroupEnter 160ms ease-out',
+        '@keyframes toolGroupEnter': {
+          from: { opacity: 0, transform: 'translateY(4px)' },
+          to: { opacity: 1, transform: 'translateY(0)' },
+        },
       }}
     >
       <Box

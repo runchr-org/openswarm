@@ -55,7 +55,24 @@ export const DefaultToolBubble: React.FC<DefaultToolBubbleProps> = ({
   const tc = useTermColors();
 
   return (
-    <Box {...selectAttrs} sx={{ maxWidth: mcpCompact ? '100%' : '85%', my: mcpCompact ? 0 : 0.5 }}>
+    <Box
+      {...selectAttrs}
+      sx={{
+        maxWidth: mcpCompact ? '100%' : '85%',
+        my: mcpCompact ? 0 : 0.5,
+        // Ease standalone tool calls in instead of popping. Skipped while
+        // streaming (the live pill has a committed twin, so animating both
+        // would flash) and when mcpCompact (rows inside a group already fade
+        // via toolRowFadeIn). Transform+opacity only, so layout/scroll are untouched.
+        ...(!isStreaming && !mcpCompact ? {
+          animation: 'toolBubbleEnter 160ms ease-out',
+          '@keyframes toolBubbleEnter': {
+            from: { opacity: 0, transform: 'translateY(4px)' },
+            to: { opacity: 1, transform: 'translateY(0)' },
+          },
+        } : {}),
+      }}
+    >
       <Box
         sx={{
           '--glow-rgb': accentRgb,

@@ -1307,19 +1307,28 @@ const AgentChat: React.FC<AgentChatProps> = ({ sessionId: sessionIdProp, onClose
                 </Box>
               );
             })}
+            {/* overflow-anchor: none on the two elements that grow every frame
+                (live stream + thinking dots) keeps Chromium's scroll anchoring
+                from fighting our jam-to-bottom for the scroll position. The
+                committed messages above keep the default anchor, so resizing a
+                tool row while the user has scrolled up still holds their view. */}
             {id && (
-              <StreamingBubble
-                sessionId={id}
-                activeBranchId={session.active_branch_id || 'main'}
-                turnLabel={session.turn_label?.label}
-                onStreamGrew={stickToBottomIfNeeded}
-              />
+              <Box sx={{ overflowAnchor: 'none' }}>
+                <StreamingBubble
+                  sessionId={id}
+                  activeBranchId={session.active_branch_id || 'main'}
+                  turnLabel={session.turn_label?.label}
+                  onStreamGrew={stickToBottomIfNeeded}
+                />
+              </Box>
             )}
             {(awaitingResponse || (session.status === 'running' && !streamingMessageId)) && (
-              <ThinkingBubble
-                label={session.turn_label?.label}
-                seedKey={`${session.id}:${session.messages?.length ?? 0}`}
-              />
+              <Box sx={{ overflowAnchor: 'none' }}>
+                <ThinkingBubble
+                  label={session.turn_label?.label}
+                  seedKey={`${session.id}:${session.messages?.length ?? 0}`}
+                />
+              </Box>
             )}
             {showResumeBubble && session.status === 'stopped' && (
               <Box sx={{ display: 'flex', justifyContent: 'flex-start', my: 0.75 }}>

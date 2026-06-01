@@ -65,7 +65,11 @@ const ToolCallBubble: React.FC<ToolCallBubbleProps> = React.memo(
     const isInvokeAgent = isInvokeAgentTool(toolName);
     const isCreateAgent = isCreateAgentTool(toolName);
     const browserAgentAutoExpand = isBrowserAgent && isPending && !isStreaming;
-    const showBody = expanded || isStreaming || browserAgentAutoExpand;
+    // While the call is still streaming we keep the body CLOSED: the args land in
+    // bursty clumps and force-painting them mid-stream is the jitter the user feels.
+    // The header pill (tool name + glow) is the calm "what's running" signal; the
+    // full args/output live behind the chevron once the call lands and is expanded.
+    const showBody = expanded || browserAgentAutoExpand;
 
     const resultContent = result?.content;
     const hasStructuredResult =

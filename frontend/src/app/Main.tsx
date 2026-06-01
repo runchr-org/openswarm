@@ -3,6 +3,7 @@ import { Provider } from 'react-redux';
 import { HashRouter, Routes, Route } from 'react-router-dom';
 import { ThemeProvider as MuiThemeProvider, createTheme, CssBaseline } from '@mui/material';
 import Box from '@mui/material/Box';
+import Fade from '@mui/material/Fade';
 import Snackbar from '@mui/material/Snackbar';
 import Alert from '@mui/material/Alert';
 import { store } from '../shared/state/store';
@@ -371,15 +372,16 @@ const DefaultModelGuard: React.FC<{ children: React.ReactNode }> = ({ children }
 
 /** Surfaces a brief recovery chip if the crash-watchdog relaunched us last cycle.
  *  Mac-only path (watchdog only runs on darwin); main.js returns null elsewhere.
- *  Auto-hides after 8s. No interaction required from the user; sessions are server-side
- *  so reattachment is automatic via the WS dashboard subscription that's already wired. */
+ *  Fade in over 250ms, hold for 8s, fade out over 300ms. No interaction required;
+ *  sessions are server-side so reattachment is automatic. */
 const CrashRecoveryChip: React.FC = () => {
   const [show, setShow] = React.useState(false);
+  const [mounted, setMounted] = React.useState(false);
   React.useEffect(() => {
     const api = (window as any).openswarm as OpenSwarmAPI | undefined;
     if (!api?.getCrashRecoveryInfo) return;
     api.getCrashRecoveryInfo().then((info) => {
-      if (info) setShow(true);
+      if (info) { setMounted(true); setShow(true); }
     }).catch(() => {});
   }, []);
   React.useEffect(() => {
@@ -387,25 +389,27 @@ const CrashRecoveryChip: React.FC = () => {
     const t = setTimeout(() => setShow(false), 8000);
     return () => clearTimeout(t);
   }, [show]);
-  if (!show) return null;
+  if (!mounted) return null;
   return (
-    <Box sx={{
-      position: 'fixed', top: 16, right: 16, zIndex: 1500,
-      display: 'flex', alignItems: 'center', gap: 1,
-      bgcolor: 'background.paper',
-      border: '1px solid', borderColor: 'divider',
-      boxShadow: 3, borderRadius: '10px',
-      px: 1.75, py: 1, fontSize: '0.85rem',
-      maxWidth: 360,
-    }}>
-      <Box component="span" sx={{
-        width: 8, height: 8, borderRadius: '50%',
-        bgcolor: 'success.main',
-      }} />
-      <Box component="span">
-        We had a hiccup and brought you back. Your sessions are still here.
+    <Fade in={show} timeout={{ enter: 250, exit: 300 }} unmountOnExit>
+      <Box sx={{
+        position: 'fixed', top: 16, right: 16, zIndex: 1500,
+        display: 'flex', alignItems: 'center', gap: 1,
+        bgcolor: 'background.paper',
+        border: '1px solid', borderColor: 'divider',
+        boxShadow: 3, borderRadius: '10px',
+        px: 1.75, py: 1, fontSize: '0.85rem',
+        maxWidth: 360,
+      }}>
+        <Box component="span" sx={{
+          width: 8, height: 8, borderRadius: '50%',
+          bgcolor: 'success.main',
+        }} />
+        <Box component="span">
+          We had a hiccup and brought you back. Your sessions are still here.
+        </Box>
       </Box>
-    </Box>
+    </Fade>
   );
 };
 

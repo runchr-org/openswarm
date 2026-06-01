@@ -716,9 +716,10 @@ async def mcp_meta(action: str, request: Request):
 async def session_compact(session_id: str):
     """Force a compaction pass on a session (Phase 2 /compact slash cmd).
 
-    Cheap programmatic summarization (no aux LLM call), so it's safe to
-    invoke at any time. Sets needs_fork=True so the next turn rebuilds
-    options and ships the compacted prefix.
+    User explicitly clicked compact, so we accept the prompt-cache loss in exchange
+    for a real visible trim: needs_fresh_session drops the SDK convo so the next turn
+    rebuilds from history with compacted_through_msg_id actually applied (auto-compact
+    only sets the marker; the button is the user opting into the cost).
     """
     from backend.apps.agents.agent_manager import agent_manager
     from backend.apps.agents.core.ws_manager import ws_manager as _ws
@@ -726,7 +727,8 @@ async def session_compact(session_id: str):
     if not session:
         return JSONResponse({"error": "session not found"}, status_code=404)
     did_compact = agent_manager._maybe_compact(session, force=True)
-    session.needs_fork = True
+    if did_compact:
+        session.needs_fresh_session = True
     await _ws.send_to_session(session_id, "agent:context_status", {
         "session_id": session_id,
         "reason": "compacted_manual" if did_compact else "noop",

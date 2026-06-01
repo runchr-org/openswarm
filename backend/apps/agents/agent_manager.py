@@ -1807,7 +1807,10 @@ class AgentManager:
                 if session.needs_fork:
                     session.needs_fork = False
             elif len(session.messages) > 1:
-                history = _build_history_prefix(_get_branch_messages(session))
+                history = _build_history_prefix(
+                    _get_branch_messages(session),
+                    cutoff_msg_id=session.compacted_through_msg_id,
+                )
                 if history:
                     if isinstance(prompt_content, str):
                         prompt_content = history + "\n\n" + prompt_content

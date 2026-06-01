@@ -48,8 +48,17 @@ def _get_branch_messages(session) -> list:
     return result
 
 
-def _build_history_prefix(messages) -> str:
-    """Format branch messages into a conversation summary for context injection."""
+def _build_history_prefix(messages, cutoff_msg_id: str | None = None) -> str:
+    """Format branch messages into a conversation summary for context injection.
+
+    When `cutoff_msg_id` is provided (session.compacted_through_msg_id), drop every
+    message up to and including that id so the marker the UI shows actually matches
+    what the model sees. Missing cutoff id falls through to full history.
+    """
+    if cutoff_msg_id:
+        skip_idx = next((i for i, m in enumerate(messages) if m.id == cutoff_msg_id), -1)
+        if skip_idx >= 0:
+            messages = messages[skip_idx + 1:]
     lines = []
     for m in messages:
         if m.role not in ("user", "assistant") or getattr(m, "hidden", False):

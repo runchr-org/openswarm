@@ -72,3 +72,108 @@ _LOOP_WARNING_TEXT = (
     "(3) use BrowserPressKey for keyboard shortcuts if the site supports them, "
     "or (4) call RequestHumanIntervention if you genuinely cannot proceed."
 )
+
+
+# --- Stagnation detection -------------------------------------------------
+# Distinct from the exact-repeat loop above. The agent can be "busy but stuck":
+# trying selector A, then B, then C, all failing. The inputs differ so the
+# exact-repeat detector never fires, yet the page never changes. We watch for a
+# run of state-mutating actions that produced no URL change AND looked like
+# failures (or just repeated the same observation), and nudge the model down
+# the strategy ladder before it burns the whole turn budget.
+
+# Read-only / meta tools don't count toward stagnation (same exemption set as
+# the loop detector): re-orienting is not "being stuck".
+_STAGNATION_NEUTRAL_TOOLS = _LOOP_DETECTION_EXCLUDED_TOOLS
+_STAGNATION_ESCALATION_AT = 3
+_STAGNATION_MAX = 5
+
+_FAILURE_MARKERS = (
+    "error", "not found", "no longer valid", "no box model",
+    "no valid bounding rect", "failed", "rejected", "timed out",
+    "could not", "unable to", "denied",
+)
+
+
+def _looks_like_failure(text: str) -> bool:
+    low = text.lower()
+    return any(m in low for m in _FAILURE_MARKERS)
+
+
+def is_unproductive(
+    tool_name: str, result: dict, prev_url: str, prev_text: str,
+) -> bool:
+    """True if a state-mutating action changed nothing observable.
+
+    Productive (returns False): a URL change, or a success-shaped result, gets
+    the benefit of the doubt (a click that opens a dropdown changes no URL but
+    is real progress). Unproductive (returns True): an error result, a
+    failure-shaped message, or the exact same observation as the previous
+    action, all with no URL change. Neutral tools (screenshot, get_text, etc.)
+    never count.
+    """
+    if tool_name in _STAGNATION_NEUTRAL_TOOLS:
+        return False
+    new_url = str(result.get("url") or "")
+    if new_url and prev_url and new_url != prev_url:
+        return False
+    if "error" in result:
+        return True
+    text = str(result.get("text") or result.get("error") or "")
+    if _looks_like_failure(text):
+        return True
+    if prev_text and text[:200] == prev_text[:200]:
+        return True
+    return False
+
+
+_STAGNATION_NUDGE = (
+    "NO PROGRESS: your last {streak} actions changed nothing on the page and "
+    "looked like failures. STOP repeating this approach. Walk DOWN the strategy "
+    "ladder: switch from CSS clicks to BrowserListInteractives + "
+    "BrowserClickIndex; if that already failed, try BrowserPressKey (Tab/Enter) "
+    "or use BrowserEvaluate to find the element by its visible text; take ONE "
+    "BrowserScreenshot to re-orient if you are unsure what's on screen."
+)
+
+
+def stagnation_nudge(streak: int) -> str:
+    base = _STAGNATION_NUDGE.format(streak=streak)
+    if streak >= _STAGNATION_MAX:
+        base += (
+            " If nothing here works, call RequestHumanIntervention instead of "
+            "continuing to fail."
+        )
+    return base
+
+
+def advance_stagnation(
+    streak: int, prev_url: str, prev_text: str, tool_name: str, result: dict,
+) -> tuple[int, str, str, str | None]:
+    """Advance the stagnation streak for one executed tool.
+
+    Neutral read/meta tools pass through unchanged (no bump, no reset). For a
+    state-mutating action, bump the streak when unproductive else reset it, and
+    return a nudge string when the streak crosses an escalation threshold.
+    Returns (new_streak, new_prev_url, new_prev_text, nudge_or_None).
+    """
+    if tool_name in _STAGNATION_NEUTRAL_TOOLS:
+        return streak, prev_url, prev_text, None
+    if is_unproductive(tool_name, result, prev_url, prev_text):
+        streak += 1
+    else:
+        streak = 0
+    new_url = str(result.get("url") or "") or prev_url
+    new_text = str(result.get("text") or result.get("error") or "")[:200]
+    nudge = (
+        stagnation_nudge(streak)
+        if streak in (_STAGNATION_ESCALATION_AT, _STAGNATION_MAX)
+        else None
+    )
+    return streak, new_url, new_text, nudge
+
+
+def stagnation_exhausted(streak: int) -> bool:
+    """True once deterministic nudging has been exhausted; the caller may then
+    escalate to a one-shot aux-LLM adjudication (see browser_validator)."""
+    return streak >= _STAGNATION_MAX

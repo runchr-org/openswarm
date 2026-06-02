@@ -15,6 +15,25 @@ _browser_history: dict[str, list[dict]] = {}
 # Cap history to prevent unbounded growth on long-lived browsers.
 _MAX_HISTORY_MESSAGES = 30
 
+# Per-apex-domain advisory notes, distilled from the agent's own ReportProgress
+# working_memory. Process-lifetime only (never written to disk); seeds a later
+# agent on the same domain so it skips re-learning the same quirks. Advisory
+# text only, never auto-executed.
+_domain_notes: dict[str, str] = {}
+_MAX_DOMAIN_NOTE_CHARS = 600
+
+
+def get_domain_note(domain: str) -> str:
+    """Return the advisory note for a domain, or empty string if none."""
+    return _domain_notes.get(domain, "")
+
+
+def set_domain_note(domain: str, note: str) -> None:
+    """Store/overwrite the advisory note for a domain (trimmed + capped)."""
+    if not domain or not note or not note.strip():
+        return
+    _domain_notes[domain] = note.strip()[:_MAX_DOMAIN_NOTE_CHARS]
+
 
 def clear_browser_history(browser_id: str) -> None:
     """Drop cached conversation history for a browser (e.g. when it's closed)."""

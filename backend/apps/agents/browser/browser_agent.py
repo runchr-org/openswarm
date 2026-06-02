@@ -29,7 +29,10 @@ from backend.apps.agents.browser.browser_loop import (
     _LOOP_WINDOW_SIZE,
     _detect_loop,
     _hash_tool_call,
+    advance_stagnation,
+    stagnation_exhausted,
 )
+from backend.apps.agents.browser.browser_validator import adjudicate_stuck
 from backend.apps.agents.browser.browser_schema import (
     _ACTION_TOOLS_REQUIRING_REPORT,
     ACTION_MAP,
@@ -271,6 +274,49 @@ async def run_browser_agent(
     recent_tool_calls: list[tuple[str, str, str]] = []
     loop_trigger_count = 0
 
+    # Stagnation state: busy-but-stuck detection (no URL change + failures
+    # across a run of actions), distinct from the exact-repeat loop above.
+    stagnation_streak = 0
+    stagnation_prev_url = ""
+    stagnation_prev_text = ""
+    aux_adjudicated = False  # the one-shot stuck-adjudication fires at most once per run
+
+    # Lazily-resolved cheap aux client, used only for the rare stuck-adjudication
+    # call once deterministic nudging is exhausted. Provider-agnostic.
+    _aux_state = {"resolved": False, "client": None, "model": None}
+
+    async def _get_aux_client():
+        if not _aux_state["resolved"]:
+            _aux_state["resolved"] = True
+            try:
+                aux_model, _ = await resolve_aux_model(browser_settings, preferred_tier="haiku")
+                _aux_state["model"] = aux_model
+                _aux_state["client"] = get_anthropic_client_for_model(browser_settings, aux_model)
+            except Exception as e:
+                logger.warning(f"[browser-agent {session_id}] no aux model for adjudication: {e}")
+        return _aux_state["client"], _aux_state["model"]
+
+    # Latest goal from ReportProgress; threaded into BrowserListInteractives so
+    # the frontend floats goal-matching elements to the top of the list. Seeded
+    # with the task so the first listing (before any ReportProgress) is boosted.
+    current_next_goal = task
+
+    # Advisory per-domain hints: seed the system prompt with what a prior agent
+    # learned about this domain (if we know the domain at start), and keep the
+    # store fresh from each ReportProgress. Re-verify, never blindly trust.
+    start_domain = _extract_domain(initial_url) if initial_url else None
+    run_system_prompt = SYSTEM_PROMPT
+    if start_domain:
+        prior_note = browser_history.get_domain_note(start_domain)
+        if prior_note:
+            run_system_prompt = (
+                SYSTEM_PROMPT
+                + f"\n\n## Notes from a previous visit to {start_domain}\n"
+                + "Learned last time on this site. Use it as a head start, but "
+                + "re-verify since the page may have changed:\n"
+                + prior_note
+            )
+
     user_msg = Message(role="user", content=task)
     session.messages.append(user_msg)
     await ws_manager.send_to_session(session_id, "agent:message", {
@@ -309,7 +355,7 @@ async def run_browser_agent(
             response = await _cancellable(client.messages.create(
                 model=api_model,
                 max_tokens=4096,
-                system=SYSTEM_PROMPT,
+                system=run_system_prompt,
                 tools=BROWSER_TOOLS_SCHEMA,
                 messages=messages,
             ))
@@ -434,6 +480,21 @@ async def run_browser_agent(
                     eval_prev = tu.input.get("evaluation_previous", "")
                     working_mem = tu.input.get("working_memory", "")
                     next_goal = tu.input.get("next_goal", "")
+                    if next_goal:
+                        current_next_goal = next_goal
+                    # Distill the agent's own working memory into a per-domain
+                    # hint for the next visit. Only persist when the run stayed
+                    # on a SINGLE apex domain: working_memory is cumulative, so
+                    # on a multi-domain run it would describe one site but get
+                    # filed under whichever domain happens to be current.
+                    note_domain = (
+                        session.browser_domains[-1]
+                        if session.browser_domains
+                        else start_domain
+                    )
+                    single_domain = len(set(session.browser_domains)) <= 1
+                    if note_domain and working_mem and single_domain:
+                        browser_history.set_domain_note(note_domain, working_mem)
                     brain_text = (
                         f"📋 **Plan**\n"
                         f"_Previous_: {eval_prev}\n"
@@ -563,8 +624,11 @@ async def run_browser_agent(
                         continue
 
                 start = time.time()
+                tool_input = tu.input
+                if tu.name == "BrowserListInteractives" and current_next_goal:
+                    tool_input = {**tu.input, "goal": current_next_goal}
                 result = await _cancellable(execute_browser_tool(
-                    tu.name, tu.input, browser_id, tab_id,
+                    tu.name, tool_input, browser_id, tab_id,
                 ))
                 if result is None:
                     cancelled = True
@@ -612,6 +676,43 @@ async def run_browser_agent(
                     content_blocks = content_blocks + [
                         {"type": "text", "text": f"\n\n⚠️ {warning}"}
                     ]
+
+                # Stagnation: busy-but-stuck (no URL change + failures across a
+                # run of actions), distinct from the exact-repeat loop above.
+                stagnation_streak, stagnation_prev_url, stagnation_prev_text, stag_nudge = advance_stagnation(
+                    stagnation_streak, stagnation_prev_url, stagnation_prev_text, tu.name, result,
+                )
+                # Skip the nudge when the loud loop warning already fired this
+                # turn (avoid double-messaging), but the aux adjudication below
+                # is NOT gated on is_loop: repeated identical failures trip BOTH
+                # detectors, and that's exactly when the escape hatch is needed.
+                if stag_nudge and not is_loop:
+                    logger.warning(
+                        f"[browser-agent {session_id}] stagnation streak "
+                        f"{stagnation_streak} on {tu.name}"
+                    )
+                    content_blocks = content_blocks + [
+                        {"type": "text", "text": f"\n\n⚠️ {stag_nudge}"}
+                    ]
+                # Deterministic nudging exhausted: ONE cheap aux adjudication
+                # to suggest a concrete next step before we keep failing.
+                if stagnation_exhausted(stagnation_streak) and not aux_adjudicated:
+                    aux_adjudicated = True
+                    aux_client, aux_model = await _get_aux_client()
+                    if aux_client and aux_model:
+                        recent = "\n".join(
+                            f"- {a['tool']} -> {str(a.get('result_summary', ''))[:120]}"
+                            for a in action_log[-3:]
+                        )
+                        page_text = str(result.get("text") or result.get("error") or "")
+                        guidance = await _cancellable(adjudicate_stuck(
+                            aux_client, aux_model, current_next_goal, recent, page_text,
+                        ))
+                        if guidance:
+                            content_blocks = content_blocks + [
+                                {"type": "text", "text": f"\n\n💡 Suggested next step: {guidance}"}
+                                ]
+
                 tool_results.append({
                     "type": "tool_result",
                     "tool_use_id": tu.id,

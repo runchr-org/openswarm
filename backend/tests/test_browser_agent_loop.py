@@ -138,9 +138,10 @@ def test_full_loop_goal_stagnation_adjudication_and_hint_write(monkeypatch):
     ))
     assert result["browser_id"] == "b1"
 
-    # 1) goal threaded into the real list_interactives call
+    # 1) goal threaded into the loop's list_interactives call (a no-goal perception
+    #    front-load may precede it now, so assert SOME call carries the goal)
     list_calls = [c for c in sent if c["action"] == "list_interactives"]
-    assert list_calls and list_calls[0]["params"].get("goal") == "click the Submit button"
+    assert any(c["params"].get("goal") == "click the Submit button" for c in list_calls)
 
     # 2) stagnation nudge injected into a tool_result (seen by a later LLM turn)
     all_msgs = json.dumps([c["messages"] for c in primary.calls])
@@ -268,6 +269,32 @@ def test_replay_falls_back_to_full_agent_when_a_step_fails(monkeypatch):
     assert len(primary.calls) > 0, "fell back to the full LLM agent"
 
 
+def test_replay_resolves_host_from_live_page_when_no_initial_url(monkeypatch):
+    # The real-flow fix: the parent often delegates to an EXISTING browser card
+    # with no initial_url (and the backend doesn't track where that card
+    # navigated). The agent must perceive the live page, learn its host, and STILL
+    # replay a previously-learned skill. Without this, replay was dead in the real
+    # orchestrated flow (records skills it can never look up again).
+    import backend.apps.agents.browser.browser_skills as SK
+    SK.clear()
+    BH._browser_history.clear()
+    # a skill exists for the host the live page will report (DOC_URL -> docs.google.com)
+    SK.record_skill("docs.google.com", "click the Submit button", [
+        {"tool": "BrowserClickIndex", "input": {}, "ok": True,
+         "clicked_role": "button", "clicked_name": "Submit"},
+    ])
+    primary = FakeLLM([Resp([Blk("text", "should not be needed")], stop_reason="end_turn")])
+    aux = FakeAux()
+    sent = _install(monkeypatch, primary, aux)
+    # NOTE: no initial_url passed; the fake browser reports url=DOC_URL via perception
+    r = asyncio.run(BA.run_browser_agent(
+        task="Please click the Submit button", browser_id="b1", model="sonnet",
+    ))
+    assert r.get("replayed") is True, "must replay via host learned from the live page"
+    assert len(primary.calls) == 0, "replay must make ZERO LLM calls"
+    assert any(c["action"] == "click_by_name" for c in sent)
+
+
 def test_replay_success_promotes_skill_to_trusted_through_the_loop(monkeypatch):
     # The verify gate, end to end: run 1 learns a PROBATION skill; run 2 replays
     # it successfully, which must PROMOTE it to trusted (proven by a real replay).
@@ -330,6 +357,41 @@ def test_unproven_skill_that_fails_is_quarantined_and_never_retried(monkeypatch)
     assert not r2.get("replayed")
     assert not any(c["action"] == "click_by_name" for c in sent), \
         "a quarantined skill must never be replayed again (would be a ghost re-fail)"
+
+
+def test_ghost_completion_is_reported_as_error_not_completed(monkeypatch):
+    # The measured ghost, end to end: the model does a bunch of failing clicks
+    # then declares done. The honesty gate must report 'error' (not 'completed')
+    # and must NOT record a skill from a run that accomplished nothing.
+    import backend.apps.agents.browser.browser_skills as SK
+    SK.clear()
+    BH._browser_history.clear()
+    primary = FakeLLM([
+        Resp([_rp("click submit"), _tu("BrowserClick", selector=".s1")]),
+        Resp([_rp("retry"), _tu("BrowserClick", selector=".s2")]),
+        Resp([Blk("text", "All done, submitted successfully!")], stop_reason="end_turn"),
+    ])
+    aux = FakeAux()
+    sent = _install(monkeypatch, primary, aux)
+    # every click errors (the fake returns an error for action 'click')
+    captured = {}
+    orig_send = BA.ws_manager.send_to_session
+
+    async def _cap(session_id, event, payload):
+        if event == "agent:status":
+            captured["status"] = payload.get("status")
+        return await orig_send(session_id, event, payload)
+    monkeypatch.setattr(BA.ws_manager, "send_to_session", _cap, raising=False)
+
+    r = asyncio.run(BA.run_browser_agent(
+        task="Submit the form", browser_id="b1", model="sonnet", initial_url=DOC_URL,
+    ))
+    # the model claimed success, but every action errored -> honest 'error'
+    assert captured.get("status") == "error", "a did-nothing run must not report completed"
+    assert "not able to complete" in r["summary"].lower()
+    assert r.get("error"), "the failure must be surfaced to the parent"
+    # and nothing was learned from the fake success
+    assert SK.find_skill("docs.google.com", "Submit the form") is None
 
 
 def test_perception_is_frontloaded_into_first_turn(monkeypatch):

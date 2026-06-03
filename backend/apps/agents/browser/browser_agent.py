@@ -31,6 +31,7 @@ from backend.apps.agents.browser.browser_loop import (
     _detect_loop,
     _hash_tool_call,
     advance_stagnation,
+    completion_is_honest,
     stagnation_exhausted,
 )
 from backend.apps.agents.browser.browser_validator import adjudicate_stuck
@@ -197,28 +198,45 @@ async def run_browser_agent(
     # Perception we prefetch on a known starting page so the model can ACT on
     # turn 1 instead of spending turns 0-2 orienting (screenshot/get_elements).
     # Pure speed: it's the same reads the agent would do anyway, just front-loaded.
-    preloaded_perception = ""
-    if initial_url:
-        nav_result = await execute_browser_tool(
-            "BrowserNavigate", {"url": initial_url}, browser_id, tab_id,
-        )
-        logger.info(f"Browser agent {session_id}: navigated to {initial_url}: {nav_result.get('text', nav_result.get('error', ''))}")
+    async def _perceive(label_url: str) -> tuple[str, str]:
+        """Cheap list+text perception of the CURRENT page. Returns
+        (front_load_block, current_url). Best-effort; never raises."""
         try:
             li = await execute_browser_tool("BrowserListInteractives", {}, browser_id, tab_id)
             gt = await execute_browser_tool("BrowserGetText", {}, browser_id, tab_id)
+            url = li.get("url") or gt.get("url") or label_url or ""
             parts = []
             if li.get("text") and "error" not in li:
                 parts.append("Interactive elements already on the page:\n" + str(li["text"]))
             if gt.get("text") and "error" not in gt:
                 parts.append("Visible page text (truncated):\n" + str(gt["text"])[:2000])
-            if parts:
-                preloaded_perception = (
-                    "\n\n[Page already loaded and inspected for you, act directly; "
-                    "no need to screenshot or list elements again unless it changes]\n"
-                    + "\n\n".join(parts)
-                )
+            block = (
+                "\n\n[Page already loaded and inspected for you, act directly; "
+                "no need to screenshot or list elements again unless it changes]\n"
+                + "\n\n".join(parts)
+            ) if parts else ""
+            return block, url
         except Exception as e:
             logger.debug(f"[browser-perf] perception prefetch skipped: {e}")
+            return "", (label_url or "")
+
+    # current_url is the live URL of the card. When the parent delegates to an
+    # EXISTING browser (no initial_url), the backend has no record of where that
+    # card navigated to, so we read it here. Without it, skill replay could never
+    # resolve the host on a repeat task and the whole fast path stayed dead.
+    preloaded_perception = ""
+    current_url = ""
+    _resumed = bool(browser_history._browser_history.get(browser_id))
+    if initial_url:
+        nav_result = await execute_browser_tool(
+            "BrowserNavigate", {"url": initial_url}, browser_id, tab_id,
+        )
+        logger.info(f"Browser agent {session_id}: navigated to {initial_url}: {nav_result.get('text', nav_result.get('error', ''))}")
+        preloaded_perception, current_url = await _perceive(initial_url)
+    elif not _resumed:
+        # Fresh task on an existing card: perceive the current page to learn its
+        # host (for replay) and front-load turn 1 (this path used to start cold).
+        preloaded_perception, current_url = await _perceive("")
 
     from backend.apps.settings.settings import load_settings
     from backend.apps.settings.credentials import get_anthropic_client_for_model
@@ -297,7 +315,7 @@ async def run_browser_agent(
     action_log: list[dict] = []
     final_screenshot: str | None = None
     metrics_started_at = time.time()  # wall-clock start for per-task timing
-    last_seen_url = initial_url or ""  # host source for skill record/replay
+    last_seen_url = initial_url or current_url or ""  # host source for skill record/replay
 
     # Loop detection state; sliding window of recent state-mutating tool calls
     recent_tool_calls: list[tuple[str, str, str]] = []
@@ -383,6 +401,8 @@ async def run_browser_agent(
     # (role,name), every step is verified, and ANY miss aborts to the full LLM
     # agent below (which re-records), so a changed page can never ghost-succeed.
     replay_host = browser_skills.host_of(initial_url) if initial_url else ""
+    if not replay_host and current_url:
+        replay_host = browser_skills.host_of(current_url)  # live URL of an existing card
     if not replay_host:
         m = re.search(r"https?://\S+", task)
         if m:
@@ -969,31 +989,45 @@ async def run_browser_agent(
             messages, _MAX_HISTORY_MESSAGES,
         )
 
-        session.status = "completed"
-        browser_metrics.record_task(session_id, browser_id, task, "completed",
+        # Honesty gate: the model declaring done is not proof the goal happened.
+        # If the run did no real work (zero actions, all actions errored, or only
+        # looked around), report the truth instead of a ghost "completed".
+        honest, dishonest_reason = completion_is_honest(action_log)
+        final_status = "completed" if honest else "error"
+        if not honest:
+            summary = f"I was not able to complete this task ({dishonest_reason})."
+            logger.warning(
+                f"[browser-agent {session_id}] completion gate caught a ghost: "
+                f"model declared done but {dishonest_reason}; reporting as error"
+            )
+
+        session.status = final_status
+        browser_metrics.record_task(session_id, browser_id, task, final_status,
                                     metrics_started_at, turn + 1, action_log, session.tokens,
                                     path="llm_fallback" if replay_attempted else "llm",
                                     task_sig=browser_skills._sig(task))
-        # Learn this task: distill the successful run into a replayable skill so
-        # the next identical task on this host runs via the no-LLM fast path.
-        try:
-            rec_host = browser_skills.host_of(last_seen_url)
-            _distilled = browser_skills.distill_steps(action_log)
-            logger.info(
-                f"[browser-skills] record attempt: host={rec_host!r} "
-                f"last_url={last_seen_url!r} action_tools={[a.get('tool') for a in action_log]} "
-                f"distilled={[s['tool'] for s in _distilled]}"
-            )
-            if browser_skills.record_skill(rec_host, task, action_log):
-                logger.info(f"[browser-skills] learned skill for {rec_host} (future runs replay fast)")
-            else:
-                logger.info(f"[browser-skills] NOT recorded (host empty or no robust steps)")
-        except Exception as e:
-            logger.warning(f"[browser-skills] record raised: {e}")
+        # Learn this task ONLY from a genuinely successful run: distill the action
+        # sequence into a replayable skill. A dishonest "completion" must never be
+        # recorded, or we'd persist a broken skill that ghosts on every replay.
+        if honest:
+            try:
+                rec_host = browser_skills.host_of(last_seen_url)
+                _distilled = browser_skills.distill_steps(action_log)
+                logger.info(
+                    f"[browser-skills] record attempt: host={rec_host!r} "
+                    f"last_url={last_seen_url!r} action_tools={[a.get('tool') for a in action_log]} "
+                    f"distilled={[s['tool'] for s in _distilled]}"
+                )
+                if browser_skills.record_skill(rec_host, task, action_log):
+                    logger.info(f"[browser-skills] learned skill for {rec_host} (future runs replay fast)")
+                else:
+                    logger.info(f"[browser-skills] NOT recorded (host empty or no robust steps)")
+            except Exception as e:
+                logger.warning(f"[browser-skills] record raised: {e}")
         agent_manager._sync_session_close(session)
         await ws_manager.send_to_session(session_id, "agent:status", {
             "session_id": session_id,
-            "status": "completed",
+            "status": final_status,
             "session": session.model_dump(mode="json"),
         })
 
@@ -1001,6 +1035,9 @@ async def run_browser_agent(
             "session_id": session_id,
             "browser_id": browser_id,
             "summary": summary,
+            # surface the honest failure to the parent so it doesn't treat a
+            # did-nothing run as a success it can build on
+            **({} if honest else {"error": summary}),
             "action_log": action_log,
             "final_screenshot": final_screenshot,
         }

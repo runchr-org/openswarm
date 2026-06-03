@@ -80,11 +80,28 @@ async function handleScreenshot(wv: BrowserWebview): Promise<Record<string, any>
   return { error: `Screenshot failed after retries: ${lastErr?.message || String(lastErr)}` };
 }
 
+// Count the safe (GET) API endpoints captured for this site so the backend can
+// nudge the agent toward the fast network path. Best-effort, never throws.
+async function countSafeRoutes(wv: BrowserWebview): Promise<number> {
+  try {
+    const bridge = (window as any).openswarm?.cdpRoutesGet as
+      | ((id: number, origin?: string) => Promise<any[]>) | undefined;
+    if (!bridge) return 0;
+    let origin = '';
+    try { origin = new URL(wv.getURL()).origin; } catch {}
+    const routes = (await bridge(wv.getWebContentsId(), origin)) || [];
+    return routes.filter((r) => r && r.safe).length;
+  } catch { return 0; }
+}
+
 async function handleGetText(wv: BrowserWebview): Promise<Record<string, any>> {
   const text: string = await wv.executeJavaScript(
     'document.body.innerText.substring(0, 15000)'
   );
-  return { text, url: wv.getURL(), title: wv.getTitle() };
+  // Sampled HERE (on a read), not on navigate: by the time the agent reads the
+  // page, the SPA's XHR/fetch have fired, so routes are actually captured.
+  const routes_available = await countSafeRoutes(wv);
+  return { text, url: wv.getURL(), title: wv.getTitle(), routes_available };
 }
 
 async function handleNavigate(wv: BrowserWebview, params: Record<string, any>): Promise<Record<string, any>> {
@@ -96,20 +113,9 @@ async function handleNavigate(wv: BrowserWebview, params: Record<string, any>): 
   } catch (err: any) {
     if (!err?.message?.includes('ERR_ABORTED')) throw err;
   }
-  // Count the safe GET endpoints captured for this site so the backend can nudge
-  // the agent toward the fast network path (the audit found it's ~0% used).
-  let routesAvailable = 0;
-  try {
-    const bridge = (window as any).openswarm?.cdpRoutesGet as
-      | ((id: number, origin?: string) => Promise<any[]>) | undefined;
-    if (bridge) {
-      let origin = '';
-      try { origin = new URL(wv.getURL()).origin; } catch {}
-      const routes = (await bridge(wv.getWebContentsId(), origin)) || [];
-      routesAvailable = routes.filter((r) => r && r.safe).length;
-    }
-  } catch {}
-  return { text: `Navigated to ${url}`, url, routes_available: routesAvailable };
+  // Route-count is sampled on the next READ (handleGetText), not here: at
+  // navigate-return the SPA's XHRs haven't fired yet, so this would always be ~0.
+  return { text: `Navigated to ${url}`, url };
 }
 
 async function handleClick(wv: BrowserWebview, params: Record<string, any>): Promise<Record<string, any>> {

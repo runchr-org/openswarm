@@ -810,6 +810,94 @@ def test_playbook_not_learned_from_a_ghost_completion(monkeypatch):
     assert PB.get_playbook("docs.google.com") == []
 
 
+def test_batch_replay_runs_a_read_loop_for_all_values(monkeypatch):
+    # The win: do one item the slow way, then BrowserRepeatFlow runs the same
+    # read flow for the rest at machine speed, one tool turn, no screenshots.
+    BH._browser_history.clear()
+    steps = [{"action": "navigate", "url": "https://docs.google.com/in/{{value}}"},
+             {"action": "evaluate", "expression": "read('{{value}}')"}]
+    primary = FakeLLM([
+        Resp([_rp("batch the rest"), _tu("BrowserRepeatFlow", steps=steps, values=["ada", "grace", "alan"])]),
+        Resp([Blk("text", "Read all three.")], stop_reason="end_turn"),
+    ])
+    sent = _install(monkeypatch, primary, FakeAux())
+    asyncio.run(BA.run_browser_agent(task="read three profiles", browser_id="b1", model="sonnet", initial_url=DOC_URL))
+    navs = [c for c in sent if c["action"] == "navigate" and "/in/" in c["params"].get("url", "")]
+    assert {c["params"]["url"].split("/in/")[1] for c in navs} == {"ada", "grace", "alan"}, "navigated each value"
+    reads = {c["params"]["expression"] for c in sent if c["action"] == "evaluate"}
+    assert reads == {"read('ada')", "read('grace')", "read('alan')"}, "read each value, per-value"
+    all_msgs = json.dumps([c["messages"] for c in primary.calls])
+    assert "Repeated the flow for 3 of 3" in all_msgs
+
+
+def test_batch_replay_is_ghost_proof_when_an_item_does_not_match(monkeypatch):
+    # THE anti-ghost test: per-item pages vary. Value 'grace' errors mid-flow ->
+    # it must be reported as needs-manual, the others still succeed, and the tally
+    # is HONEST ('2 of 3'), never a silent 'did them all'.
+    BH._browser_history.clear()
+    steps = [{"action": "navigate", "url": "https://docs.google.com/in/{{value}}"},
+             {"action": "evaluate", "expression": "read('{{value}}')"}]
+    primary = FakeLLM([
+        Resp([_rp("batch"), _tu("BrowserRepeatFlow", steps=steps, values=["ada", "grace", "alan"])]),
+        Resp([Blk("text", "Handled.")], stop_reason="end_turn"),
+    ])
+    sent = _install(monkeypatch, primary, FakeAux())
+
+    async def _vary(request_id, action, browser_id, params, tab_id=""):
+        sent.append({"action": action, "params": params})
+        if action == "navigate" and "grace" in params.get("url", ""):
+            return {"error": "Page not found for grace (different layout)"}
+        if action == "navigate":
+            return {"text": "Navigated", "url": params.get("url")}
+        return {"text": "profile data", "url": DOC_URL}
+    monkeypatch.setattr(BA.ws_manager, "send_browser_command", _vary, raising=False)
+
+    asyncio.run(BA.run_browser_agent(task="read three", browser_id="b1", model="sonnet", initial_url=DOC_URL))
+    all_msgs = json.dumps([c["messages"] for c in primary.calls])
+    assert "Repeated the flow for 2 of 3" in all_msgs, "honest tally, not a ghost 'all done'"
+    assert "grace" in all_msgs, "the failed item is surfaced for manual handling"
+    # grace errored at navigate -> its read must NOT have run; ada+alan did
+    reads = {c["params"]["expression"] for c in sent if c["action"] == "evaluate"}
+    assert "read('grace')" not in reads, "the failed item must NOT proceed (no ghost)"
+    assert reads == {"read('ada')", "read('alan')"}, "exactly the matching items ran"
+
+
+def test_batch_replay_refuses_a_send_loop_and_executes_nothing(monkeypatch):
+    # The send gate: a flow that clicks 'Send message' must be REFUSED outright,
+    # nothing is clicked, so we can never auto-message N people.
+    BH._browser_history.clear()
+    steps = [{"action": "navigate", "url": "https://docs.google.com/in/{{value}}"},
+             {"action": "click", "role": "button", "name": "Message"},
+             {"action": "type", "selector": "#msg", "text": "hi {{value}}"},
+             {"action": "click", "role": "button", "name": "Send"}]
+    primary = FakeLLM([
+        Resp([_rp("blast messages"), _tu("BrowserRepeatFlow", steps=steps, values=["a", "b", "c"])]),
+        Resp([Blk("text", "Okay, individually then.")], stop_reason="end_turn"),
+    ])
+    sent = _install(monkeypatch, primary, FakeAux())
+    asyncio.run(BA.run_browser_agent(task="message people", browser_id="b1", model="sonnet", initial_url=DOC_URL))
+    all_msgs = json.dumps([c["messages"] for c in primary.calls])
+    assert "Refused to auto-repeat" in all_msgs and "one at a time" in all_msgs
+    # NOTHING from the loop ran: no navigate to a value, no clicks
+    assert not any(c["action"] == "navigate" and "/in/" in c["params"].get("url", "") for c in sent)
+    assert not any(c["action"] == "click_by_name" for c in sent)
+
+
+def test_batch_replay_uses_the_fast_network_route_per_value(monkeypatch):
+    # Folds in the audit finding: a read-loop can hit a captured API endpoint
+    # (replay_route) per value instead of clicking the UI, the fast tier.
+    BH._browser_history.clear()
+    steps = [{"action": "replay_route", "url": "https://docs.google.com/api/p?u={{value}}"}]
+    primary = FakeLLM([
+        Resp([_rp("fetch via api"), _tu("BrowserRepeatFlow", steps=steps, values=["ada", "grace"])]),
+        Resp([Blk("text", "Got both via API.")], stop_reason="end_turn"),
+    ])
+    sent = _install(monkeypatch, primary, FakeAux())
+    asyncio.run(BA.run_browser_agent(task="fetch two", browser_id="b1", model="sonnet", initial_url=DOC_URL))
+    routes = [c["params"]["url"] for c in sent if c["action"] == "replay_route"]
+    assert any("u=ada" in u for u in routes) and any("u=grace" in u for u in routes)
+
+
 def test_prior_domain_hint_is_seeded_into_system_prompt(monkeypatch):
     BH._browser_history.clear(); BH._domain_notes.clear()
     BH.set_domain_note("google.com", "REMEMBERED: Share button is index 43; Tab into the dialog.")

@@ -39,6 +39,7 @@ from backend.apps.agents.browser.browser_loop import (
     stagnation_exhausted,
 )
 from backend.apps.agents.browser.browser_validator import adjudicate_stuck
+from backend.apps.agents.browser import browser_batch_replay
 from backend.apps.agents.browser import browser_metrics
 from backend.apps.agents.browser import browser_playbook
 from backend.apps.agents.browser import browser_skills
@@ -813,6 +814,61 @@ async def run_browser_agent(
                                      if ok else f"No matching shortcut \"{target}\" found to remove.")
                     tool_results.append({"type": "tool_result", "tool_use_id": tu.id, "content": [{"type": "text", "text": meta_text}]})
                     result_msg = Message(role="tool_result", content={"text": meta_text, "tool_name": tu.name, "elapsed_ms": 0})
+                    session.messages.append(result_msg)
+                    await ws_manager.send_to_session(session_id, "agent:message", {
+                        "session_id": session_id, "message": result_msg.model_dump(mode="json"),
+                    })
+                    continue
+
+                # Intra-run batch replay: run a learned mechanical flow for many
+                # inputs at machine speed, verify every step, gate sends, never
+                # ghost. Reads/searches loop freely; irreversible steps refuse.
+                if tu.name == "BrowserRepeatFlow":
+                    steps_tmpl = tu.input.get("steps") or []
+                    values = [str(v) for v in (tu.input.get("values") or [])]
+                    ok_struct, why = browser_batch_replay.validate_template(steps_tmpl)
+                    safe, safe_why = (browser_batch_replay.template_safety(steps_tmpl) if ok_struct else (False, why))
+                    if not ok_struct:
+                        bf_text = f"Couldn't run the batch: {why}."
+                    elif not safe:
+                        bf_text = (f"Refused to auto-repeat this flow: {safe_why}. "
+                                   "Do those steps one at a time so each is confirmed.")
+                    elif not values:
+                        bf_text = "No values to repeat; nothing to do."
+                    else:
+                        done, failed = [], []
+                        for val in values:
+                            if cancel_event.is_set():
+                                break
+                            item_ok = True
+                            for tool_name, params in browser_batch_replay.fill_template(steps_tmpl, val):
+                                st = time.time()
+                                res = await _cancellable(execute_browser_tool(tool_name, params, browser_id, tab_id))
+                                if res is None:
+                                    item_ok = False; break
+                                el = int((time.time() - st) * 1000)
+                                step_ok = "error" not in res
+                                action_log.append({
+                                    "tool": tool_name, "input": params,
+                                    "result_summary": str(res.get("text", res.get("error", "")))[:200],
+                                    "elapsed_ms": el, "ok": step_ok,
+                                })
+                                browser_metrics.record_tool(
+                                    session_id, browser_id, turn, tool_name, el, ok=step_ok,
+                                    error=res.get("error", ""), is_loop=False, stagnation_streak=0,
+                                    result_len=len(str(res.get("text") or res.get("error") or "")),
+                                )
+                                if res.get("url"):
+                                    last_seen_url = res["url"]
+                                if not step_ok:
+                                    item_ok = False; break
+                            (done if item_ok else failed).append(val)
+                        bf_text = f"Repeated the flow for {len(done)} of {len(values)}."
+                        if failed:
+                            bf_text += (f" These didn't match the template and need you to handle them "
+                                        f"individually: {', '.join(failed[:20])}.")
+                    tool_results.append({"type": "tool_result", "tool_use_id": tu.id, "content": [{"type": "text", "text": bf_text}]})
+                    result_msg = Message(role="tool_result", content={"text": bf_text, "tool_name": tu.name, "elapsed_ms": 0})
                     session.messages.append(result_msg)
                     await ws_manager.send_to_session(session_id, "agent:message", {
                         "session_id": session_id, "message": result_msg.model_dump(mode="json"),

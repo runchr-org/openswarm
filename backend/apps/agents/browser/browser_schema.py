@@ -316,6 +316,54 @@ BROWSER_TOOLS_SCHEMA = [
         },
     },
     {
+        "name": "BrowserRepeatFlow",
+        "description": (
+            "Repeat a mechanical flow you JUST did, fast, for many inputs, without "
+            "re-screenshotting or re-analyzing the page each time. After you've done "
+            "ONE item the slow way (e.g. searched and read one person), call this "
+            "with the step template and the remaining inputs and they run at machine "
+            "speed: zero screenshots, zero extra thinking. Write the steps using "
+            "{{value}} wherever the input varies. Each iteration is verified; any "
+            "item whose page doesn't match falls back and is reported so you can "
+            "handle it yourself, it never pretends. Use this for SEARCH / READ / "
+            "NAVIGATE loops. It REFUSES irreversible steps (Send, Submit, Connect, "
+            "Post, Pay, Delete, message composers): do those one at a time. For "
+            "reading data, a 'replay_route' step (hit a captured API endpoint) is "
+            "far faster than navigating the UI."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "steps": {
+                    "type": "array",
+                    "description": "The flow for ONE item, in order. Put {{value}} where the input varies.",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "action": {"type": "string", "enum": ["navigate", "get_text", "evaluate", "type", "click", "press_key", "scroll", "replay_route"]},
+                            "url": {"type": "string", "description": "for navigate / replay_route"},
+                            "selector": {"type": "string", "description": "for type"},
+                            "text": {"type": "string", "description": "for type"},
+                            "role": {"type": "string", "description": "for click (e.g. button, link)"},
+                            "name": {"type": "string", "description": "for click: the visible text"},
+                            "key": {"type": "string", "description": "for press_key (e.g. Enter)"},
+                            "expression": {"type": "string", "description": "for evaluate (JS)"},
+                            "direction": {"type": "string", "description": "for scroll"},
+                            "amount": {"type": "integer", "description": "for scroll"},
+                        },
+                        "required": ["action"],
+                    },
+                },
+                "values": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "The inputs to run the flow for (the remaining items after the one you already did).",
+                },
+            },
+            "required": ["steps", "values"],
+        },
+    },
+    {
         "name": "BrowserDetectWebMCP",
         "description": (
             "Check whether the current page declares its own WebMCP tools "
@@ -487,6 +535,17 @@ SYSTEM_PROMPT = (
     "- You need to read the page state between actions\n"
     "- You're uncertain about what comes next\n"
     "- An action might trigger an unexpected popup or navigation\n\n"
+
+    "## Doing the SAME flow for many inputs? Use BrowserRepeatFlow\n"
+    "If you're about to repeat the same mechanical flow for a list (read 10 "
+    "profiles, search 8 terms, open each result): do the FIRST one normally to "
+    "confirm the steps, then call BrowserRepeatFlow with the step template "
+    "(use {{value}} where the input varies) and the remaining values. It runs them "
+    "all in ONE turn at machine speed, no screenshots, and verifies each, "
+    "reporting any that don't fit so you handle them yourself. For reading data, "
+    "a 'replay_route' step (a captured API endpoint, see BrowserListRoutes) is far "
+    "faster than navigating the UI. It refuses Send/Submit/Connect/Pay/Delete "
+    "loops on purpose, do those one at a time so each is confirmed.\n\n"
 
     "## Avoid wasted cycles\n"
     "- Do NOT screenshot after every single action. Screenshot ONLY when you genuinely "

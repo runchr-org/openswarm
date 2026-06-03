@@ -22,6 +22,7 @@ _LOOP_DETECTION_EXCLUDED_TOOLS = {
     "RequestHumanIntervention",
     "BrowserListSkills",      # meta: inspect own learned skills
     "BrowserDeprecateSkill",  # meta: prune a stale skill
+    "BrowserRepeatFlow",      # batch: drives its own verified per-item loop
 }
 
 _LOOP_WINDOW_SIZE = 5

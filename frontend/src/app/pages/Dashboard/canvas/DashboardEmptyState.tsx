@@ -2,6 +2,7 @@ import React from 'react';
 import Box from '@mui/material/Box';
 import Typography from '@mui/material/Typography';
 import type { ClaudeTokens } from '@/shared/styles/claudeTokens';
+import ChatBubbleTeardrop from '../ChatBubbleTeardrop';
 
 const DashboardEmptyState: React.FC<{ c: ClaudeTokens }> = ({ c }) => (
   <Box
@@ -22,6 +23,9 @@ const DashboardEmptyState: React.FC<{ c: ClaudeTokens }> = ({ c }) => (
     <Typography
       sx={{
         fontSize: '0.9rem',
+        display: 'inline-flex',
+        alignItems: 'center',
+        gap: 0.7,
         background: `linear-gradient(90deg, ${c.text.ghost} 0%, ${c.text.ghost} 40%, ${c.text.primary} 50%, ${c.text.ghost} 60%, ${c.text.ghost} 100%)`,
         backgroundSize: '200% 100%',
         WebkitBackgroundClip: 'text',
@@ -31,7 +35,12 @@ const DashboardEmptyState: React.FC<{ c: ClaudeTokens }> = ({ c }) => (
         animation: 'empty-state-shimmer 6s linear infinite',
       }}
     >
-      Click the chat bubble below to launch your first agent
+      Click the
+      {/* Literal toolbar glyph; the shimmer's transparent color would hide it, so reset color here. */}
+      <Box component="span" sx={{ display: 'inline-flex', color: c.text.tertiary }}>
+        <ChatBubbleTeardrop sx={{ fontSize: 15 }} />
+      </Box>
+      below to launch your first agent
     </Typography>
   </Box>
 );

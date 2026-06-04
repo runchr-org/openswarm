@@ -1839,14 +1839,24 @@ app.on('web-contents-created', (_event, contents) => {
 
   if (contents.getType() === 'webview') {
     contents.on('console-message', (_e, level, message, line, sourceId) => {
+      const tag = ['LOG', 'INFO', 'WARN', 'ERROR'][level] || 'LOG';
+      const src = sourceId ? sourceId.split('/').pop() : '';
       if (message.includes('widevine') || message.includes('drm') ||
           message.includes('license') || message.includes('MediaKeySession') ||
           message.includes('EME') || message.includes('[drm-diag]') ||
           message.includes('openswarm') ||
           level >= 2) {
-        const tag = ['LOG', 'INFO', 'WARN', 'ERROR'][level] || 'LOG';
-        const src = sourceId ? sourceId.split('/').pop() : '';
         console.log(`[webview:${tag}] ${message}${src ? ` (${src}:${line})` : ''}`);
+      }
+      // Buffer warnings + errors so a stuck browser agent can READ why a page is
+      // broken (JS exceptions, failed resource loads) via BrowserGetConsole. The
+      // listener already fires for these, so this adds no forwarding; capped at 30
+      // and clamped to 300 chars each so a chatty page can't bloat memory.
+      if (level >= 2) {
+        let buf = webviewConsoleErrors.get(contents.id);
+        if (!buf) { buf = []; webviewConsoleErrors.set(contents.id, buf); }
+        buf.push({ level: tag, message: String(message).slice(0, 300), source: src, line });
+        if (buf.length > 30) buf.shift();
       }
     });
 
@@ -1879,6 +1889,7 @@ app.on('web-contents-created', (_event, contents) => {
       cdpChildSessions.delete(contents.id);
       cdpAutoAttachWired.delete(contents.id);
       cdpRoutesByWcId.delete(contents.id);
+      webviewConsoleErrors.delete(contents.id);
     });
 
     contents.on('render-process-gone', () => {
@@ -1887,6 +1898,7 @@ app.on('web-contents-created', (_event, contents) => {
       cdpChildSessions.delete(contents.id);
       cdpAutoAttachWired.delete(contents.id);
       cdpRoutesByWcId.delete(contents.id);
+      webviewConsoleErrors.delete(contents.id);
     });
 
     // WebAuthn/passkey shim. Injected on every dom-ready in the main world
@@ -2258,6 +2270,7 @@ const cdpQueueByWcId = new Map();  // wcId -> Promise (serialization tail)
 const cdpChildSessions = new Map();   // wcId -> Map<sessionId, {frameId, parentSessionId, url}>
 const cdpAutoAttachWired = new Set(); // wcIds whose 'message' listener is attached
 const cdpRoutesByWcId = new Map();    // wcId -> Map<routeKey, entry> (tier-2 shadow-API capture)
+const webviewConsoleErrors = new Map(); // wcId -> [{level,message,source,line}] capped warn+error, read via BrowserGetConsole
 
 function wireChildSessions(wc) {
   const wcId = wc.id;
@@ -2399,6 +2412,10 @@ ipcMain.handle('cdp-routes-get', (_event, wcId, originFilter) => {
   if (originFilter) list = list.filter((r) => r.template.startsWith(originFilter));
   return list.sort((a, b) => b.hits - a.hits || b.lastSeen - a.lastSeen);
 });
+
+// Recent warn+error console output for one webview, so a stuck browser agent can
+// see the page's own JS/network errors. Returns a shallow copy (newest last).
+ipcMain.handle('get-webview-console', (_event, wcId) => (webviewConsoleErrors.get(wcId) || []).slice());
 
 ipcMain.handle('connect-slack', async () => {
   const win = new BrowserWindow({

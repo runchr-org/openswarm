@@ -15,6 +15,7 @@ import json
 _LOOP_DETECTION_EXCLUDED_TOOLS = {
     "BrowserScreenshot",
     "BrowserGetText",
+    "BrowserGetConsole",  # read-only diagnostic; reading it repeatedly is fine
     "BrowserGetElements",
     "BrowserListInteractives",  # Phase 3
     "BrowserWait",
@@ -69,10 +70,11 @@ def _detect_loop(
 _LOOP_WARNING_TEXT = (
     "LOOP DETECTED: the same action got the same result {count} times, so repeating "
     "it will NOT help. Diagnose the REAL cause before anything else, do not assume: "
-    "read the exact error in the result; use BrowserEvaluate to check whether your "
-    "target actually exists but is disabled, hidden, or covered by an overlay; use "
-    "BrowserGetText or BrowserScreenshot to check whether the page is really a login "
-    "wall, captcha, or error page rather than what you expected. THEN fix that exact "
+    "read the exact error in the result; call BrowserGetConsole to see the page's own "
+    "JS/network errors (a failed API call or crashed app is often the real reason); "
+    "use BrowserEvaluate to check whether your target actually exists but is disabled, "
+    "hidden, or covered by an overlay; use BrowserGetText or BrowserScreenshot to check "
+    "whether the page is really a login wall, captcha, or error page. THEN fix that exact "
     "cause: a wrong selector means switch to BrowserListInteractives + BrowserClickIndex "
     "or BrowserPressKey; a blocked element means clear the blocker first; a login, "
     "captcha, or error page means call RequestHumanIntervention. Don't just try another "
@@ -136,8 +138,9 @@ def is_unproductive(
 _STAGNATION_NUDGE = (
     "NO PROGRESS: your last {streak} actions changed nothing and looked like "
     "failures. Before trying yet another variation, find out WHY: read the exact "
-    "errors; use BrowserEvaluate to check if the target is disabled, hidden, or "
-    "behind an overlay; take ONE BrowserGetText or BrowserScreenshot to confirm the "
+    "errors; call BrowserGetConsole for the page's own JS/network errors; use "
+    "BrowserEvaluate to check if the target is disabled, hidden, or behind an "
+    "overlay; take ONE BrowserGetText or BrowserScreenshot to confirm the "
     "page is what you think (not a login wall, captcha, or error page). Act on the "
     "real cause; only if it is truly a selector miss do you walk the ladder "
     "(BrowserListInteractives + BrowserClickIndex, then BrowserPressKey, then "

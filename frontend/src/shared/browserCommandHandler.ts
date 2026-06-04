@@ -6,7 +6,7 @@ import { shouldStopWaiting, SETTLE_FLOOR_MS, SETTLE_POLL_MS, SETTLE_PROBE_JS } f
 
 let initialized = false;
 
-export type BrowserAction = 'screenshot' | 'get_text' | 'navigate' | 'click' | 'type' | 'evaluate' | 'get_elements' | 'scroll' | 'wait' | 'press_key' | 'list_interactives' | 'click_index' | 'batch' | 'detect_webmcp' | 'list_routes' | 'replay_route' | 'click_by_name';
+export type BrowserAction = 'screenshot' | 'get_text' | 'get_console' | 'navigate' | 'click' | 'type' | 'evaluate' | 'get_elements' | 'scroll' | 'wait' | 'press_key' | 'list_interactives' | 'click_index' | 'batch' | 'detect_webmcp' | 'list_routes' | 'replay_route' | 'click_by_name';
 
 export interface BrowserActivity {
   action: BrowserAction;
@@ -123,6 +123,32 @@ async function handleGetText(wv: BrowserWebview): Promise<Record<string, any>> {
   // page, the SPA's XHR/fetch have fired, so routes are actually captured.
   const routes_available = await countSafeRoutes(wv);
   return { text, url: wv.getURL(), title: wv.getTitle(), routes_available };
+}
+
+// Recent warn+error console output for this webview (captured in main.js). Lets a
+// stuck agent see the page's OWN errors (JS exceptions, failed loads) instead of
+// guessing. Read-only, fail-safe: any miss returns an empty, honest result.
+async function handleGetConsole(wv: BrowserWebview): Promise<Record<string, any>> {
+  try {
+    const bridge = (window as any).openswarm?.getWebviewConsole as
+      | ((id: number) => Promise<Array<{ level: string; message: string; source?: string; line?: number }>>)
+      | undefined;
+    if (!bridge) return { text: 'Console capture is unavailable here.', errors: [] };
+    const errors = (await bridge(wv.getWebContentsId())) || [];
+    if (errors.length === 0) {
+      return { text: 'No console warnings or errors recorded on this page.', errors: [], url: wv.getURL() };
+    }
+    const lines = errors.map(
+      (e) => `[${e.level}] ${e.message}${e.source ? ` (${e.source}:${e.line ?? '?'})` : ''}`,
+    );
+    return {
+      text: `Page console, ${errors.length} recent warning(s)/error(s), newest last:\n${lines.join('\n')}`,
+      errors,
+      url: wv.getURL(),
+    };
+  } catch (err: any) {
+    return { text: `Could not read console: ${err?.message || String(err)}`, errors: [] };
+  }
 }
 
 async function handleNavigate(wv: BrowserWebview, params: Record<string, any>): Promise<Record<string, any>> {
@@ -915,6 +941,9 @@ async function handleBrowserCommand(data: Record<string, any>) {
         break;
       case 'get_text':
         result = await handleGetText(wv);
+        break;
+      case 'get_console':
+        result = await handleGetConsole(wv);
         break;
       case 'navigate':
         result = await handleNavigate(wv, params);

@@ -75,6 +75,22 @@ BROWSER_TOOLS_SCHEMA = [
         },
     },
     {
+        "name": "BrowserGetConsole",
+        "description": (
+            "Read the page's OWN recent JavaScript console warnings and errors "
+            "(uncaught exceptions, failed resource loads like a 403/500, React "
+            "errors). Use this when an action isn't working and the page looks "
+            "fine: it tells you WHY the page is broken (an API call failed, the "
+            "app crashed) so you fix the real cause instead of retrying blindly. "
+            "Read-only; returns nothing if the page logged no warnings or errors."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {},
+            "required": [],
+        },
+    },
+    {
         "name": "BrowserNavigate",
         "description": "Navigate the browser to a URL.",
         "input_schema": {
@@ -444,6 +460,7 @@ BROWSER_TOOLS_SCHEMA = [
 ACTION_MAP = {
     "BrowserScreenshot": "screenshot",
     "BrowserGetText": "get_text",
+    "BrowserGetConsole": "get_console",
     "BrowserNavigate": "navigate",
     "BrowserClick": "click",
     "BrowserType": "type",
@@ -497,7 +514,7 @@ SYSTEM_PROMPT = (
     "Emit ReportProgress and your action tool(s) together in the same response. "
     "If you skip ReportProgress, your action tools will be REJECTED with an error "
     "and you will have to retry. This is not optional. Read-only tools "
-    "(BrowserScreenshot, BrowserGetText, BrowserGetElements, BrowserWait) do not "
+    "(BrowserScreenshot, BrowserGetText, BrowserGetConsole, BrowserGetElements, BrowserWait) do not "
     "require ReportProgress.\n\n"
 
     "## Loop awareness\n"

@@ -35,6 +35,7 @@ _TIER = {
     "BrowserListInteractives": "t3_action_surface",
     "BrowserClickIndex": "t3_action_surface",
     "BrowserGetText": "t4_content",
+    "BrowserGetConsole": "t4_content",
     "BrowserGetElements": "t4_content",
     "BrowserScreenshot": "t5_vision",
     "BrowserNavigate": "nav",

@@ -12,6 +12,9 @@ def metrics(monkeypatch):
     d = tempfile.mkdtemp(prefix="bm_test_")
     monkeypatch.setenv("OPENSWARM_BROWSER_METRICS_DIR", d)
     from backend.apps.agents.browser import browser_metrics as bm
+    # The dir is memoized once for the prod hot path; drop the cache so each test
+    # re-resolves to its own temp dir instead of inheriting a prior test's.
+    bm._metrics_dir_cache = None
     return bm, d
 
 
@@ -80,6 +83,7 @@ def test_metrics_never_raises_on_bad_dir(monkeypatch):
     # An unwritable dir must not throw into the agent loop.
     monkeypatch.setenv("OPENSWARM_BROWSER_METRICS_DIR", "/proc/cannot/write/here")
     from backend.apps.agents.browser import browser_metrics as bm
+    bm._metrics_dir_cache = None  # re-resolve so we actually hit the bad dir
     bm.record_tool("s", "b", 1, "BrowserScreenshot", 5, ok=True, error="",
                    is_loop=False, stagnation_streak=0, result_len=1)  # must not raise
     bm.record_task("s", "b", "t", "error", __import__("time").time(), 1, [], {})

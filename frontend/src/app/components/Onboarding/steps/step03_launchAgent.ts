@@ -13,14 +13,14 @@ export const step03: OnboardingStep = {
   stage: 'get_started',
   index: 3,
   title: 'Launch your first Agent',
-  description: 'Click + to fire up a new Agent in a dashboard.',
+  description: 'Click the chat bubble to fire up a new Agent in a dashboard.',
   videoSrc: './onboarding-videos/v2/03.mp4',
   videoDurationLabel: '0:24',
   skipIf: hasAnyAgentLaunched,
   requiresDashboard: true,
   ops: [
     { kind: 'move_to', target: S.newAgentButton },
-    { kind: 'popup', text: 'Tap the plus to start a fresh chat.' },
+    { kind: 'popup', text: 'Tap the chat bubble to start a fresh chat.' },
     {
       kind: 'wait_user',
       condition: { kind: 'click_target', target: S.newAgentButton },

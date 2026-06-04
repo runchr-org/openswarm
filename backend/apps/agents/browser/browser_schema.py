@@ -216,7 +216,10 @@ BROWSER_TOOLS_SCHEMA = [
             "Uses native OS-level mouse events (event.isTrusted=true) so it works "
             "on sites that filter out synthetic JS events. Always call "
             "BrowserListInteractives first to get a fresh index list. If the click "
-            "returns 'index no longer valid', the page changed; re-list and retry."
+            "returns 'index no longer valid', the page changed; re-list and retry. "
+            "If the index is a TEXT BOX (role textbox or searchbox), it is "
+            "focused directly by node (no coordinates, so it works inside messaging/"
+            "compose overlays where clicks miss); pass `text` to fill it in one call."
         ),
         "input_schema": {
             "type": "object",
@@ -224,6 +227,14 @@ BROWSER_TOOLS_SCHEMA = [
                 "index": {
                     "type": "integer",
                     "description": "The numeric index from BrowserListInteractives (1-based).",
+                },
+                "text": {
+                    "type": "string",
+                    "description": (
+                        "Optional. If the index is a text box, focus it and type this "
+                        "whole string in one call (no character-by-character). Use this "
+                        "to fill a compose/message box reliably."
+                    ),
                 },
                 "expect": _EXPECT_DESC,
             },
@@ -586,7 +597,11 @@ SYSTEM_PROMPT = (
     "Call BrowserListInteractives to get a numbered list (`[1]<button \"Like\">`, "
     "`[2]<link \"Settings\">`), then BrowserClickIndex with the number. The click uses "
     "native OS-level mouse events so it works where DOM .click() doesn't. THIS IS YOUR "
-    "GO-TO STRATEGY for unlabeled or hostile sites; try this BEFORE BrowserGetElements.\n"
+    "GO-TO STRATEGY for unlabeled or hostile sites; try this BEFORE BrowserGetElements. "
+    "To FILL a text box (a `<textbox>` like a message/compose field, including ones inside "
+    "a messaging overlay where clicks miss), call BrowserClickIndex on it with a `text` arg: "
+    "it focuses the box by node and types the whole string in ONE call, no coordinates, no "
+    "character-by-character. Then send with BrowserPressKey 'Enter' or the Send button.\n"
     "3. **Semantic CSS selectors**; `button[aria-label='X']`, `[role='button']`, "
     "`a[href*='...']`. Try these via BrowserGetElements + BrowserClick when the site "
     "actually has semantic HTML.\n"

@@ -367,12 +367,36 @@ async function enumerateCandidates(wv: BrowserWebview): Promise<RankItem[]> {
 // Shared by click_index (cache lookup) and click_by_name (fresh resolution).
 async function clickBackendNode(
   wv: BrowserWebview, backendNodeId: number, sessionId: string | undefined, label: string,
+  opts: { role?: string; text?: string } = {},
 ): Promise<Record<string, any>> {
   try {
     await sendCdp(wv, 'DOM.resolveNode', { backendNodeId }, sessionId);
   } catch (err: any) {
     return { error: `${label} is no longer valid (${err.message || 'node not found'}). The page may have changed.` };
   }
+
+  // A text box is focused DIRECTLY by node id, never by screen coordinates. Inside an
+  // about:blank compose iframe (LinkedIn/Gmail messaging) the coordinate path lands on
+  // the wrong element (the box model is frame-local but the click dispatches in the root
+  // frame), while DOM.focus reaches the node in any frame. With a `text` arg we then
+  // insert the whole string at once, no clicking, no character-by-character typing.
+  if (/\b(textbox|searchbox)\b/i.test(opts.role || '')) {
+    try {
+      await sendCdp(wv, 'DOM.focus', { backendNodeId }, sessionId);
+    } catch (err: any) {
+      return { error: `${label} could not be focused (${err?.message || 'focus failed'}); it may be disabled or hidden.` };
+    }
+    if (typeof opts.text === 'string' && opts.text.length > 0) {
+      try {
+        await sendCdp(wv, 'Input.insertText', { text: opts.text });
+      } catch (err: any) {
+        return { error: `Focused ${label} but could not type into it: ${err?.message || String(err)}` };
+      }
+      return { text: `Focused ${label} and typed the text in.` };
+    }
+    return { text: `Focused ${label}; the cursor is in it now (type with BrowserPressKey, or pass a text arg to fill it in one call).` };
+  }
+
   let boxModel;
   try {
     boxModel = await sendCdp(wv, 'DOM.getBoxModel', { backendNodeId }, sessionId);
@@ -493,7 +517,8 @@ async function handleClickIndex(wv: BrowserWebview, params: Record<string, any>)
     };
   }
 
-  const result = await clickBackendNode(wv, backendNodeId, sessionId, `index ${idx}`);
+  const result = await clickBackendNode(wv, backendNodeId, sessionId, `index ${idx}`,
+    { role, text: typeof params.text === 'string' ? params.text : undefined });
   // Surface what was clicked so the agent loop can record a stable,
   // replayable click-by-name step (indices are ephemeral; names aren't).
   if (!result.error) {
@@ -523,7 +548,8 @@ async function handleClickByName(wv: BrowserWebview, params: Record<string, any>
   if (!match) {
     return { error: `No element matching role="${wantRole}" name="${wantName}" on this page.` };
   }
-  return clickBackendNode(wv, match.backendNodeId, match.sessionId, `${match.role} "${match.name}"`);
+  return clickBackendNode(wv, match.backendNodeId, match.sessionId, `${match.role} "${match.name}"`,
+    { role: match.role });
 }
 
 // Sequential sub-actions; aborts mid-batch if URL changes (indices/selectors go stale on navigation).

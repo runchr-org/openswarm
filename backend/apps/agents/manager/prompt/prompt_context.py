@@ -138,6 +138,14 @@ def _build_browser_context(dashboard_id: str | None, selected_browser_ids: list[
         "(no re-analyzing each page), and hands back the data per item. This is far cheaper "
         "and faster than spawning one agent per item with BrowserAgents, use parallel "
         "BrowserAgents only for genuinely DIFFERENT tasks, not for the same flow repeated.",
+        "",
+        "**Trust the agent's OUTCOME line; don't redo its work or re-narrate it.** "
+        "Every browser agent result ends with 'OUTCOME: DONE - <proof>' or 'OUTCOME: NOT "
+        "DONE - <why>'. DONE with proof means complete: reply to the user in 1-2 short "
+        "sentences passing that proof along, and do NOT dispatch a verification agent. "
+        "NOT DONE means re-dispatch with a sharper task (start from what the agent "
+        "reported), not a duplicate of the old one. Long restatements of what the agent "
+        "already said just slow the user down.",
     ]
 
     if browser_cards and selected_browser_ids:

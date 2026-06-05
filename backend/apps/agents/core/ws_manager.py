@@ -18,6 +18,7 @@ _BROWSER_CMD_TIMEOUTS = {
     "replay_route": 20.0, # an API fetch can be slow
     "wait": 12.0,         # smart-wait already caps itself well under this
 }
+_BROWSER_CMD_REBROADCAST_S = 3.0
 
 
 class ConnectionManager:
@@ -242,16 +243,17 @@ class ConnectionManager:
         if not self.global_connections:
             return {"error": "No dashboard is connected. Open the dashboard to use browser tools."}
 
-        future = asyncio.get_event_loop().create_future()
+        loop = asyncio.get_event_loop()
+        future = loop.create_future()
         self.browser_futures[request_id] = future
 
-        await self.broadcast_global("browser:command", {
+        payload = {
             "request_id": request_id,
             "action": action,
             "browser_id": browser_id,
             "tab_id": tab_id,
             "params": params,
-        })
+        }
 
         try:
             # Bound each command so a wedged tab can't block for 30s (the cost
@@ -261,10 +263,21 @@ class ConnectionManager:
             # command just times out and the next success resets the agent's streak,
             # so only a SUSTAINED hang trips the fast-fail abort.
             timeout = _BROWSER_CMD_TIMEOUTS.get(action, _BROWSER_CMD_TIMEOUT_DEFAULT)
-            result = await asyncio.wait_for(future, timeout=timeout)
-            return result
-        except asyncio.TimeoutError:
-            return {"error": "Browser command timed out"}
+            deadline = loop.time() + timeout
+            # Re-broadcast until a client answers: a silently-dead dashboard
+            # socket takes up to ~35s of heartbeat to notice, and a command
+            # sent into that gap is lost forever (broadcast skips seq_log).
+            # The renderer dedupes by request_id so re-sends can't double-act.
+            while True:
+                await self.broadcast_global("browser:command", payload)
+                remaining = deadline - loop.time()
+                if remaining <= 0:
+                    return {"error": "Browser command timed out"}
+                done, _ = await asyncio.wait(
+                    {future}, timeout=min(_BROWSER_CMD_REBROADCAST_S, remaining)
+                )
+                if done:
+                    return future.result()
         finally:
             self.browser_futures.pop(request_id, None)
 

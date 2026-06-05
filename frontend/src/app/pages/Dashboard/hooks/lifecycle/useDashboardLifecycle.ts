@@ -83,6 +83,12 @@ export function useDashboardLifecycle({
     dispatch(fetchSessions({ dashboardId }));
     dispatch(fetchLayout(dashboardId));
     const cleanupBrowserHandler = initBrowserCommandHandler();
+    // Global broadcasts (spawned browser cards) skip the replay log, so a
+    // socket gap loses them; a reconnect refetch is the only way they return.
+    const unsubReconnect = dashboardWs.on('dashboard:reconnected', () => {
+      dispatch(fetchSessions({ dashboardId }));
+      dispatch(fetchLayout(dashboardId));
+    });
     // DEFERRABLE: history list (for the search palette) and outputs
     // (for the apps panel) aren't on the first-paint path. Same for the
     // dashboard WS connection (it carries cross-session events; opens
@@ -136,6 +142,7 @@ export function useDashboardLifecycle({
       clearTimeout(warmTimer);
       warmAbort.abort();
       cleanupBrowserHandler();
+      unsubReconnect();
       dashboardWs.disconnect();
       // Cancel any not-yet-fired idle work; the cleanup handler can't
       // run partially if the dashboard switches before idle fired.

@@ -107,6 +107,7 @@ class WebSocketManager {
   // Set to true by `disconnect()` so we don't reconnect after an
   // explicit close (component unmount / user clicks Close).
   private explicitlyClosed: boolean = false;
+  private hasConnectedOnce: boolean = false;
 
   // Heartbeat. We send a ping on a fixed cadence and arm a timeout
   // for the pong; if the timeout fires, we force-close the socket so
@@ -224,7 +225,13 @@ class WebSocketManager {
         // Dashboard / global WS: no resume, queue can flush right away.
         this.resumeAcked = true;
         this.flushQueue();
+        // Global broadcasts skip the replay log, so anything missed during
+        // a socket gap only reappears if subscribers refetch on reconnect.
+        if (this.hasConnectedOnce) {
+          this.listeners.get('dashboard:reconnected')?.forEach((fn) => fn({}));
+        }
       }
+      this.hasConnectedOnce = true;
     };
 
     this.ws.onmessage = (event) => {

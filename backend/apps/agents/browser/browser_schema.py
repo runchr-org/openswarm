@@ -535,6 +535,16 @@ SYSTEM_PROMPT = (
     "ONLY when the page clearly contradicts your plan. Verbose per-turn prose is the single "
     "biggest thing that slows you down, so once the plan exists, keep execution turns short.\n\n"
 
+    "## Jump straight to deep URLs\n"
+    "The fastest navigation is a URL you construct yourself. Most sites expose search "
+    "and entities as URL patterns: a LinkedIn people search is "
+    "linkedin.com/search/results/people/?keywords=NAME, a Google search is "
+    "google.com/search?q=..., a YouTube search is youtube.com/results?search_query=..., "
+    "an Amazon search is amazon.com/s?k=.... When the task names a thing to find, "
+    "BrowserNavigate DIRECTLY to the site's search-results URL for it instead of loading "
+    "the homepage and driving its search UI; one navigate replaces three clicks and two "
+    "waits. Fall back to the UI only when you don't know the site's URL pattern.\n\n"
+
     "## Required output structure: ReportProgress before every action\n"
     "Before ANY action tool (BrowserClick, BrowserType, BrowserNavigate, "
     "BrowserPressKey, BrowserScroll, BrowserEvaluate, BrowserClickIndex, "
@@ -595,7 +605,10 @@ SYSTEM_PROMPT = (
     "accessibility tree sees roles and names that the raw DOM doesn't, even on sites "
     "like Tinder, Instagram, and TikTok that use unlabeled <div>s with click handlers. "
     "Call BrowserListInteractives to get a numbered list (`[1]<button \"Like\">`, "
-    "`[2]<link \"Settings\">`), then BrowserClickIndex with the number. The click uses "
+    "`[2]<link \"Settings\">`), then BrowserClickIndex with the number. A `*` after the "
+    "number marks an element that appeared since your previous look; right after a click "
+    "that opened a dialog or menu, the `*` rows are almost always the ones to act on. "
+    "The click uses "
     "native OS-level mouse events so it works where DOM .click() doesn't. THIS IS YOUR "
     "GO-TO STRATEGY for unlabeled or hostile sites; try this BEFORE BrowserGetElements. "
     "To FILL a text box (a `<textbox>` like a message/compose field, including ones inside "
@@ -660,7 +673,12 @@ SYSTEM_PROMPT = (
     "- Anything genuinely ambiguous about user intent\n"
     "Don't use it for normal tool failures; try a different approach first.\n\n"
 
-    "Complete the task autonomously and report a clear, brief summary."
+    "Complete the task autonomously. Your FINAL message MUST begin with exactly one "
+    "line: 'OUTCOME: DONE - <the verifiable result>' or 'OUTCOME: NOT DONE - <what is "
+    "missing and why>'. The parent agent decides whether to re-dispatch another browser "
+    "from that line alone, so a vague or missing outcome line costs a whole redundant "
+    "agent run. For irreversible actions, DONE requires the proof you observed "
+    "(e.g. 'message visible in thread at 9:31 PM'). Keep the rest of the summary brief."
 )
 
 MAX_TURNS = 40

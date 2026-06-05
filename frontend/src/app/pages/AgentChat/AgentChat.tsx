@@ -1485,16 +1485,7 @@ const AgentChat: React.FC<AgentChatProps> = ({ sessionId: sessionIdProp, onClose
               border: `1.5px solid ${c.accent.primary}`,
               background: `${c.accent.primary}08`,
               boxShadow: `0 0 12px ${c.accent.primary}25, inset 0 0 12px ${c.accent.primary}08`,
-              animation: 'continue-chat-glow 2s ease-in-out infinite',
               transition: 'background 0.15s, box-shadow 0.15s',
-              '@keyframes continue-chat-glow': {
-                '0%, 100%': {
-                  boxShadow: `0 0 12px ${c.accent.primary}25, inset 0 0 12px ${c.accent.primary}08`,
-                },
-                '50%': {
-                  boxShadow: `0 0 20px ${c.accent.primary}40, inset 0 0 20px ${c.accent.primary}15`,
-                },
-              },
               '&:hover': {
                 background: `${c.accent.primary}14`,
                 boxShadow: `0 0 24px ${c.accent.primary}50, inset 0 0 20px ${c.accent.primary}18`,

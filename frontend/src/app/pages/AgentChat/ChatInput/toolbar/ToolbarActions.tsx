@@ -63,11 +63,7 @@ export const ToolbarActions: React.FC<Props> = ({
                       bgcolor: '#3b82f6',
                       color: '#fff',
                       '&:hover': { bgcolor: '#2563eb' },
-                      animation: 'selectBtnPulse 2s ease-in-out infinite',
-                      '@keyframes selectBtnPulse': {
-                        '0%, 100%': { boxShadow: '0 0 0 0 rgba(59,130,246,0.4)' },
-                        '50%': { boxShadow: '0 0 0 4px rgba(59,130,246,0.1)' },
-                      },
+                      boxShadow: '0 0 0 3px rgba(59,130,246,0.18)',
                     }
                   : {
                       color: c.text.tertiary,

@@ -125,11 +125,13 @@ const DashboardHeader: React.FC<DashboardHeaderProps> = ({
       >
         <DashboardIcon sx={{ fontSize: 'small', color: c.accent.primary }} />
         <Typography
+          noWrap
           sx={{
             fontSize: '0.9rem',
             fontWeight: 600,
             color: c.text.primary,
             lineHeight: 1,
+            maxWidth: 320,
           }}
         >
           {dashboardName || 'Dashboard'}

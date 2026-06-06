@@ -1472,6 +1472,14 @@ async def run_browser_agent(
                         and str((tu.input or {}).get("text") or "").strip()
                         and "error" not in result):
                     _send = find_send_index("\n".join(attached_state_seen))
+                    if not _send:
+                        # the Send control usually renders a beat AFTER the text
+                        # lands; settle once and re-list to catch the late paint.
+                        await browser_wait.smart_wait(_wait_exec, browser_id, tab_id, 1500)
+                        _relist = await _cancellable(execute_browser_tool(
+                            "BrowserListInteractives", {}, browser_id, tab_id))
+                        if isinstance(_relist, dict) and _relist.get("text"):
+                            _send = find_send_index(str(_relist["text"]))
                     if _send:
                         _si, _sn = _send
                         result["text"] = (f"{result.get('text') or ''}\n\n[send-ready] The Send "

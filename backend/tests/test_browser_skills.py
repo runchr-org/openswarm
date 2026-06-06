@@ -665,3 +665,35 @@ def test_route_hint_adoption_matching(_isolated_skills):
     # the Message and Send clicks did not run
     assert adopted[0] and adopted[1] and adopted[3]
     assert not adopted[2] and not adopted[4]
+
+
+# --- conservative detour pruning ---------------------------------------------
+def test_distill_prunes_abandoned_navigate_detour():
+    # wrong profile opened (navigate), abandoned for a search (navigate), then
+    # the right profile + the real productive steps. The first navigate is a
+    # detour: nothing acted on its page before the next navigate.
+    log = [
+        {"tool": "BrowserNavigate", "input": {"url": "https://x.com/in/wrong"}, "ok": True},
+        {"tool": "BrowserNavigate", "input": {"url": "https://x.com/search?q=tyler"}, "ok": True},
+        {"tool": "BrowserClickIndex", "input": {"index": 1}, "ok": True,
+         "clicked_role": "link", "clicked_name": "Tyler Chen"},
+        {"tool": "BrowserType", "input": {"selector": "#msg", "text": "hi"}, "ok": True},
+    ]
+    steps = sk.distill_steps(log)
+    urls = [s["params"].get("url") for s in steps if s["tool"] == "BrowserNavigate"]
+    assert urls == ["https://x.com/search?q=tyler"]  # the abandoned wrong nav dropped
+    assert [s["tool"] for s in steps] == ["BrowserNavigate", "BrowserClickByName", "BrowserType"]
+
+
+def test_distill_keeps_navigate_that_was_acted_on():
+    # a navigate followed by a real action on that page is NOT a detour.
+    log = [
+        {"tool": "BrowserNavigate", "input": {"url": "https://x.com/form"}, "ok": True},
+        {"tool": "BrowserType", "input": {"selector": "#q", "text": "hi"}, "ok": True},
+        {"tool": "BrowserNavigate", "input": {"url": "https://x.com/results"}, "ok": True},
+        {"tool": "BrowserClickIndex", "input": {"index": 2}, "ok": True,
+         "clicked_role": "button", "clicked_name": "Go"},
+    ]
+    steps = sk.distill_steps(log)
+    urls = [s["params"].get("url") for s in steps if s["tool"] == "BrowserNavigate"]
+    assert urls == ["https://x.com/form", "https://x.com/results"]  # both kept

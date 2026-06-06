@@ -309,7 +309,23 @@ def distill_steps(action_log: list[dict]) -> list[dict]:
             productive_count += 1
     if productive_count == 0:
         return []
-    return steps
+    return _prune_detours(steps)
+
+
+def _prune_detours(steps: list[dict]) -> list[dict]:
+    """Drop an abandoned-page detour: a BrowserNavigate whose page was never
+    acted on because the very next step navigates somewhere else. Conservative
+    on purpose, only consecutive navigates qualify (if a page had been used,
+    a Type/Click/etc would sit between them), so a needed step is never removed.
+    This keeps a wrong-turn (e.g. the wrong profile, then the right one) out of
+    a recorded macro without any reachability guesswork."""
+    out: list[dict] = []
+    for i, s in enumerate(steps):
+        nxt = steps[i + 1] if i + 1 < len(steps) else None
+        if s.get("tool") == "BrowserNavigate" and nxt is not None and nxt.get("tool") == "BrowserNavigate":
+            continue  # this navigate's page was abandoned immediately; skip it
+        out.append(s)
+    return out
 
 
 def first_unsafe_step(steps: list[dict]) -> tuple[int, str]:

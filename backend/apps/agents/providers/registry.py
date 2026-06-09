@@ -67,9 +67,11 @@ BUILTIN_MODELS: dict[str, list[dict[str, Any]]] = {
          "model_id": "claude-haiku-4-5", "router_model_id": "cc/claude-haiku-4-5-20251001", "api": "anthropic", "reasoning": True, "route": "cc"},
 
         # Fable 5 (released 2026-05-28): new flagship tier ABOVE Opus, 1M ctx,
-        # 128k out, $10/$50. API-key route only: a brand-new id 404s on our pinned
-        # 9Router 0.3.60 sub route (same as GPT-5.5's cx entry), and Claude-sub
-        # serving of Fable is unverified, add the cc/ entry once it's proven live.
+        # 128k out, $10/$50. The cc/ sub row is on trial: brand-new ids have 404'd
+        # our pinned 9Router 0.3.60 before (GPT-5.5's cx entry did) and Claude-sub
+        # serving of Fable is unverified, so pull this row if it errors live.
+        {"value": "fable-5-cc", "label": "Claude Fable 5", "context_window": 1_000_000,
+         "model_id": "claude-fable-5", "router_model_id": "cc/claude-fable-5", "api": "anthropic", "reasoning": True, "route": "cc"},
         {"value": "fable-5-api", "label": "Claude Fable 5 (API key)", "context_window": 1_000_000,
          "model_id": "claude-fable-5", "router_model_id": "claude-fable-5", "api": "anthropic", "reasoning": True, "route": "api"},
         {"value": "opus-4-8-api", "label": "Claude Opus 4.8 (API key)", "context_window": 1_000_000,

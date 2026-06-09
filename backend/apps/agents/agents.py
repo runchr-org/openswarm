@@ -628,6 +628,10 @@ async def list_models():
             # by the subscription, not pay-per-use.
             for r in rows:
                 r["billing_kind"] = "subscription"
+            # Sub-only models with no adaptive twin (Fable 5) won't ride the relabeled rows, so add their cc/ entry.
+            adaptive_ids = {m.get("model_id") for m in adaptive}
+            cc_only = [m for m in cc_variants if m.get("model_id") not in adaptive_ids]
+            rows = _serialize(cc_only) + rows
         # With BOTH a key and a sub the adaptive rows above run on the key, so also surface the
         # subscription (cc) variants; they route via 9router's cc/ lane and stay selectable, the
         # way OpenAI/Gemini show both a subscription row and an API-key row.

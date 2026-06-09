@@ -74,51 +74,71 @@ const HANDLE_DEFS: { dir: ResizeDir; sx: Record<string, any> }[] = [
   { dir: 'se', sx: { bottom: -EDGE_THICKNESS / 2, right: -EDGE_THICKNESS / 2, width: CORNER_SIZE, height: CORNER_SIZE } },
 ];
 
-// Windows defaults to the iframe fallback: the <webview> tag mount used to segfault
-// the renderer during Chromium's commit phase on the CastLabs build (since 1.1.55,
-// same crash family as the ablated <input type=file> and Framer-Motion subtrees).
-// The Electron 42 bump never re-verified it. Mac is unaffected and always gets the
-// full webview + CDP agent. An iframe can't be scripted (no CDP, most sites send
-// X-Frame-Options), so the agent literally can't drive a page on Windows until the
-// real webview is proven safe.
+// Windows gets the real, agent-controllable <webview> + CDP, same as Mac.
 //
-// Opt-in to test that (can't be reproduced on Mac): in DevTools run
-//   localStorage.setItem('openswarm_try_win_webview','1')
-// then reload. The opt-in PERSISTS across reloads/restarts so a whole task can run
-// on the real webview, but it's crash-safe: each armed boot marks a pending flag
-// that's only cleared once a webview reaches dom-ready (proof it survived commit).
-// If a boot crashes before that, the next boot sees the stale pending flag, stands
-// down to the safe iframe, and records _crashed, so it can never boot-loop. Clear
-// _crashed and re-arm to retry.
-const WIN_WV_OPT_IN = 'openswarm_try_win_webview';
+// History: the <webview> tag mount used to segfault the renderer during Chromium's
+// commit phase on the old CastLabs Electron 40 build (0xC0000005, since 1.1.55, same
+// crash family as the ablated <input type=file> and Framer-Motion subtrees), so
+// Windows fell back to a non-scriptable iframe (no CDP, and most sites send
+// X-Frame-Options) which the agent can't drive. The Electron 42 bump (v42.0.0+wvcus)
+// fixed the segfault: faithful in-process probes on the real 42 binary mount the
+// webview - including two at once inside a transformed/contained canvas, with real
+// HTTPS navigation and reload churn - with zero host-renderer crash.
+//
+// Crash-safe by construction (electron/CLAUDE.md: mitigations must fail quiet in BOTH
+// directions, and crash guards never boot-loop). If some Windows config still
+// segfaults on mount, a pending marker - armed synchronously during the first
+// browser-card render, i.e. before the <webview> commits, see armWindowsWebviewPending
+// - survives the crash. A leftover marker at the next launch means that mount never
+// reached dom-ready, so we count it and stand down to the safe iframe this launch;
+// after WIN_WV_MAX such crashes we stay on the iframe for good. A clean dom-ready
+// clears the marker and the counter. Escape hatch: openswarm_win_webview_off='1'
+// forces the iframe; clear openswarm_win_webview_crashes to retry after a lockout.
+const WIN_WV_OFF = 'openswarm_win_webview_off';
 const WIN_WV_PENDING = 'openswarm_win_webview_pending';
-const WIN_WV_CRASHED = 'openswarm_win_webview_crashed';
+const WIN_WV_CRASHES = 'openswarm_win_webview_crashes';
+const WIN_WV_MAX = 2;
 
-function windowsWebviewArmed(): boolean {
+function windowsWebviewEnabled(): boolean {
   try {
-    if (localStorage.getItem(WIN_WV_OPT_IN) !== '1') return false;
+    if (localStorage.getItem(WIN_WV_OFF) === '1') return false;
+    const crashes = parseInt(localStorage.getItem(WIN_WV_CRASHES) || '0', 10) || 0;
+    if (crashes >= WIN_WV_MAX) return false;
     if (localStorage.getItem(WIN_WV_PENDING)) {
-      localStorage.removeItem(WIN_WV_OPT_IN);
+      // A webview mounted last launch but never reached dom-ready: it crashed on
+      // commit. Count it and use the safe iframe this launch (retry next launch).
       localStorage.removeItem(WIN_WV_PENDING);
-      localStorage.setItem(WIN_WV_CRASHED, String(Date.now()));
-      console.warn('[win-webview-trial] webview crashed on commit last boot; reverted to the safe iframe. Re-arm to retry.');
+      localStorage.setItem(WIN_WV_CRASHES, String(crashes + 1));
+      console.warn(`[win-webview] mount crashed last launch (${crashes + 1}/${WIN_WV_MAX}); using the safe iframe this launch.`);
       return false;
     }
-    localStorage.setItem(WIN_WV_PENDING, String(Date.now()));
-    console.info('[win-webview-trial] armed: mounting the real webview on Windows (Electron 42 commit-crash test).');
     return true;
   } catch {
     return false;
   }
 }
 
-// Clears the pending flag once a webview survives to dom-ready; no-op on Mac (never set).
+// Armed once, synchronously, during the first browser-card render so it persists
+// even if the <webview> commit segfaults (a ref/effect would run too late, after the
+// crash). Cleared on dom-ready by markWindowsWebviewSurvived. No-op on Mac / iframe.
+let _winWvPendingArmed = false;
+function armWindowsWebviewPending(): void {
+  if (_winWvPendingArmed) return;
+  _winWvPendingArmed = true;
+  try { localStorage.setItem(WIN_WV_PENDING, String(Date.now())); } catch {}
+}
+
+// Clears the pending marker + crash counter once a webview survives to dom-ready;
+// no-op on Mac (never set).
 function markWindowsWebviewSurvived(): void {
-  try { localStorage.removeItem(WIN_WV_PENDING); } catch {}
+  try {
+    localStorage.removeItem(WIN_WV_PENDING);
+    localStorage.removeItem(WIN_WV_CRASHES);
+  } catch {}
 }
 
 const isWindows = navigator.userAgent.includes('Windows');
-const isElectron = navigator.userAgent.includes('Electron') && (!isWindows || windowsWebviewArmed());
+const isElectron = navigator.userAgent.includes('Electron') && (!isWindows || windowsWebviewEnabled());
 
 const chromeUserAgent = navigator.userAgent
   .replace(/\s*Electron\/\S+/, '')
@@ -169,6 +189,12 @@ const BrowserCard: React.FC<Props> = ({
   isSelected = false, isHighlighted = false, multiDragDelta, onCardSelect, onDragStart, onDragMove, onDragEnd,
   cardZOrder = 0, onDoubleClick, onBringToFront,
 }) => {
+  // Arm the Windows webview crash-safety marker synchronously, before React commits
+  // the <webview> below. Cleared on dom-ready; a leftover marker next launch tells
+  // windowsWebviewEnabled() the mount crashed, so it falls back to the iframe.
+  // Idempotent, no-op on Mac and on the iframe path. See the gate block above.
+  if (isElectron && isWindows) armWindowsWebviewPending();
+
   const c = useClaudeTokens();
   const dispatch = useAppDispatch();
   const scrollOverlayRef = useOverlayScrollPassthrough(isSelected);
@@ -246,12 +272,9 @@ const BrowserCard: React.FC<Props> = ({
         initializedTabs.current.add(tabId);
         const targetUrl = tab.url;
         const doLoad = () => {
-          // Reaching dom-ready means the webview survived Chromium's commit phase,
-          // the crash the Windows opt-in is testing for. Clear the pending flag.
-          if (isWindows) {
-            markWindowsWebviewSurvived();
-            console.info('[win-webview-trial] webview survived commit on Electron 42 (dom-ready reached).');
-          }
+          // Reaching dom-ready proves the webview survived Chromium's commit phase
+          // (the historical Windows mount segfault). Clear the crash-safety marker.
+          if (isWindows) markWindowsWebviewSurvived();
           wv.loadURL(targetUrl).catch(() => {});
           // Lock guest zoom at 1.0 so ctrl+wheel never triggers Chromium's in-page zoom; canvas zoom takes over (issue #27).
           try {

@@ -1031,6 +1031,13 @@ const agentsSlice = createSlice({
           const existing = state.sessions[s.id];
           state.sessions[s.id] = {
             ...s,
+            // This is a METADATA poll (status/name); the chat owns its messages
+            // via fetchSession + the WS stream. A poll response computed before a
+            // just-sent user turn must NOT clobber the live array, that intermittently
+            // wiped the user's own bubble (while the assistant stream, a separate
+            // slice, kept rendering). Keep the hydrated messages; only adopt the
+            // poll's copy for a session we haven't loaded into the chat yet.
+            messages: existing?.messages?.length ? existing.messages : s.messages ?? [],
             pending_approvals: existing?.pending_approvals?.length
               ? existing.pending_approvals
               : s.pending_approvals ?? [],

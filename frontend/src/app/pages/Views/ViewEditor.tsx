@@ -29,7 +29,7 @@ import VisibilityOffIcon from '@mui/icons-material/VisibilityOff';
 import Collapse from '@mui/material/Collapse';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import { useAppDispatch, useAppSelector } from '@/shared/hooks';
-import { createDraftSession, removeDraftSession, fetchSession } from '@/shared/state/agentsSlice';
+import { createDraftSession, removeDraftSession } from '@/shared/state/agentsSlice';
 import { createOutput, updateOutput, fetchOutputs, Output, SERVE_BASE } from '@/shared/state/outputsSlice';
 import { useClaudeTokens } from '@/shared/styles/ThemeContext';
 import AgentChat from '../AgentChat/AgentChat';
@@ -410,6 +410,13 @@ const ViewEditor: React.FC<Props> = ({ output }) => {
     (async () => {
       // Reattach: Output has an existing session + workspace; skip seeding/draft so we don't clobber agent state.
       if (output?.session_id && output?.workspace_id) {
+        // Mount the chat NOW so the cached conversation renders instantly
+        // (AgentChat's own hydrate + WS catch up on what we missed); holding it
+        // behind the verification round-trips blanked the chat for seconds on
+        // every reopen. The stale-id guard below still runs, just in the
+        // background, and swaps in a fresh draft on the rare 404.
+        setInitialDraftId(output.session_id);
+
         let resolvedWorkspacePath: string | null = null;
         try {
           const res = await fetch(`${WORKSPACE_API}/${output.workspace_id}`);
@@ -429,14 +436,9 @@ const ViewEditor: React.FC<Props> = ({ output }) => {
           sessionStillExists = sr.ok;
         } catch { /* network blip, treat as missing */ }
 
-        if (sessionStillExists) {
-          // Catch up on anything the agent did while we were on another tab.
-          dispatch(fetchSession(output.session_id));
-          setInitialDraftId(output.session_id);
-          return;
-        }
+        if (sessionStillExists) return;
 
-        // Stale link: clear it so future opens skip the 404 round-trip, then fall through.
+        // Stale link: clear it so future opens skip the 404 round-trip, then swap to a fresh draft.
         if (output.id) {
           try {
             await dispatch(updateOutput({ id: output.id, session_id: null })).unwrap();

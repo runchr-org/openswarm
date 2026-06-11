@@ -373,7 +373,6 @@ const AppShell: React.FC = () => {
           height: 38,
           flexShrink: 0,
           bgcolor: c.bg.secondary,
-          borderBottom: `0.5px solid ${c.border.medium}`,
           display: 'flex',
           alignItems: 'center',
           position: 'relative',
@@ -1007,8 +1006,7 @@ const AppShell: React.FC = () => {
         <Box
           sx={{
             px: 1,
-            py: 1,
-            borderTop: `0.5px solid ${c.border.subtle}`,
+            py: 1.25,
           }}
         >
           <ListItemButton

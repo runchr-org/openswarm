@@ -19,7 +19,6 @@ const SettingsHeader: React.FC<{
       sx={{
         px: 3,
         py: 0,
-        borderBottom: `1px solid ${c.border.subtle}`,
       }}
     >
       <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', pt: 1.5, pb: 0.5 }}>
@@ -34,17 +33,23 @@ const SettingsHeader: React.FC<{
         value={activeTab}
         onChange={(_, v) => onTabChange(v)}
         sx={{
-          minHeight: 36,
+          minHeight: 34,
+          pb: 1,
+          // Pill segmented control: filled active pill, no underline indicator.
+          '& .MuiTabs-indicator': { display: 'none' },
           '& .MuiTab-root': {
-            minHeight: 36,
+            minHeight: 30,
             textTransform: 'none',
             fontSize: '0.85rem',
             fontWeight: 500,
             color: c.text.muted,
-            px: 1.5,
-            '&.Mui-selected': { color: c.accent.primary, fontWeight: 600 },
+            px: 1.75,
+            mr: 0.5,
+            borderRadius: '999px',
+            transition: 'background-color 0.12s, color 0.12s',
+            '&:hover': { color: c.text.secondary, bgcolor: `${c.text.tertiary}0A` },
+            '&.Mui-selected': { color: c.text.primary, fontWeight: 600, bgcolor: `${c.accent.primary}26` },
           },
-          '& .MuiTabs-indicator': { backgroundColor: c.accent.primary, height: 2 },
         }}
       >
         <Tab label="General" value="general" disableRipple />

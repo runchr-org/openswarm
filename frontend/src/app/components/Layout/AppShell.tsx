@@ -456,7 +456,7 @@ const AppShell: React.FC = () => {
           <Typography
             sx={{
               color: c.text.secondary,
-              fontSize: '0.82rem',
+              fontSize: '0.9rem',
               fontWeight: 600,
               letterSpacing: 0.2,
               lineHeight: 1,
@@ -486,7 +486,7 @@ const AppShell: React.FC = () => {
           }}
         >
           <ErrorSlime size={22} />
-          <Typography sx={{ fontSize: '0.78rem', color: '#ef4444', flex: 1, fontWeight: 500, letterSpacing: '0.01em' }}>
+          <Typography sx={{ fontSize: '0.86rem', color: '#ef4444', flex: 1, fontWeight: 500, letterSpacing: '0.01em' }}>
             {!isOnline
               ? 'No internet connection; agents cannot reach AI models or external services'
               : (
@@ -665,7 +665,7 @@ const AppShell: React.FC = () => {
                 sx={{
                   '& .MuiListItemText-primary': {
                     color: isDashboardRoute ? c.text.primary : c.text.muted,
-                    fontSize: '0.82rem',
+                    fontSize: '0.9rem',
                     fontWeight: isDashboardRoute ? 600 : 400,
                   },
                 }}
@@ -754,7 +754,7 @@ const AppShell: React.FC = () => {
                           sx={{
                             flex: 1,
                             minWidth: 0,
-                            fontSize: '0.78rem',
+                            fontSize: '0.86rem',
                             fontWeight: isActive ? 500 : 400,
                             color: isActive ? c.text.secondary : c.text.ghost,
                             py: 0,
@@ -775,7 +775,7 @@ const AppShell: React.FC = () => {
                           }}
                           sx={{
                             color: isActive ? c.text.secondary : c.text.ghost,
-                            fontSize: '0.78rem',
+                            fontSize: '0.86rem',
                             fontWeight: isActive ? 500 : 400,
                             overflow: 'hidden',
                             textOverflow: 'ellipsis',
@@ -827,7 +827,7 @@ const AppShell: React.FC = () => {
                 sx={{
                   '& .MuiListItemText-primary': {
                     color: isCustomizationRoute ? c.text.primary : c.text.muted,
-                    fontSize: '0.82rem',
+                    fontSize: '0.9rem',
                     fontWeight: isCustomizationRoute ? 600 : 400,
                   },
                 }}
@@ -876,7 +876,7 @@ const AppShell: React.FC = () => {
                       <Typography
                         sx={{
                           color: isActive ? c.text.secondary : c.text.ghost,
-                          fontSize: '0.78rem',
+                          fontSize: '0.86rem',
                           fontWeight: isActive ? 500 : 400,
                           overflow: 'hidden',
                           textOverflow: 'ellipsis',
@@ -922,7 +922,7 @@ const AppShell: React.FC = () => {
                 sx={{
                   '& .MuiListItemText-primary': {
                     color: isAppsRoute ? c.text.primary : c.text.muted,
-                    fontSize: '0.82rem',
+                    fontSize: '0.9rem',
                     fontWeight: isAppsRoute ? 600 : 400,
                   },
                 }}
@@ -993,7 +993,7 @@ const AppShell: React.FC = () => {
                       <Typography
                         sx={{
                           color: isActive ? c.text.secondary : c.text.ghost,
-                          fontSize: '0.78rem',
+                          fontSize: '0.86rem',
                           fontWeight: isActive ? 500 : 400,
                           overflow: 'hidden',
                           textOverflow: 'ellipsis',
@@ -1054,7 +1054,7 @@ const AppShell: React.FC = () => {
               sx={{
                 '& .MuiListItemText-primary': {
                   color: c.text.muted,
-                  fontSize: '0.82rem',
+                  fontSize: '0.9rem',
                   fontWeight: 400,
                 },
               }}

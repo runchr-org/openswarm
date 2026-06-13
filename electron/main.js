@@ -1278,8 +1278,20 @@ function createWindow() {
     // same window back instantly (`activate` below). Real quits must pass
     // through — preventing a close during app.quit() cancels the quit
     // (Electron semantics), which is exactly what the flag guards against.
-    if (process.platform === 'darwin' && !quitInitiated) {
+    // isInstallingUpdate must pass through: native quitAndInstall TERMINATES the app
+    // by closing the window (with quitInitiated still false), so intercepting it here
+    // hides the window and strands the update uninstalled. That was THE bug behind
+    // "Restart & Update does nothing" on Mac. Let that close (and real quits) through.
+    if (process.platform === 'darwin' && !quitInitiated && !isInstallingUpdate) {
       e.preventDefault();
+      // A staged update waiting + a user close = "apply it on the way out". Kick off
+      // the install (arms ShipIt + drives a real quit) instead of just hiding, so the
+      // red button finally updates instead of looping.
+      if (cachedUpdateStatus && cachedUpdateStatus.status === 'downloaded') {
+        console.log('[updater] close with a staged update; applying it');
+        installDownloadedUpdate();
+        return;
+      }
       try {
         if (thisWindow.isFullScreen()) {
           // Hiding a fullscreen window strands a black space; leave
@@ -2142,13 +2154,15 @@ app.on('window-all-closed', () => {
   // closer. Explicit quits (Cmd+Q, dock Quit) are untouched — Electron's
   // quit pipeline runs will-quit -> killBackend regardless of this handler.
   if (process.platform === 'darwin') {
-    // One exception: a Mac update only installs when the process actually dies, but
-    // the keep-alive above means the red button no longer quits. So if an update is
-    // downloaded and waiting, treat the close as "apply it" (quit + swap + relaunch)
-    // instead of lingering windowless and re-prompting on every reopen. This is what
-    // the banner promised and what users expect when they close to finish updating.
-    if (!isInstallingUpdate && cachedUpdateStatus && cachedUpdateStatus.status === 'downloaded') {
-      console.log('[updater] window closed with a staged update; applying it on close');
+    // An update install closed the window (native quitAndInstall) and now needs the
+    // process to actually die so ShipIt can swap + relaunch; finish the quit instead
+    // of the keep-alive return. This is the half my first pass missed: without it the
+    // window closes but the app lingers and the swap never happens.
+    if (isInstallingUpdate) { app.quit(); return; }
+    // A staged update with no explicit install (a teardown that skipped the 'close'
+    // handler): apply it on the way out instead of re-prompting next launch.
+    if (cachedUpdateStatus && cachedUpdateStatus.status === 'downloaded') {
+      console.log('[updater] all windows closed with a staged update; applying it');
       installDownloadedUpdate();
     }
     return;

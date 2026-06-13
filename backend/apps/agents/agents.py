@@ -34,6 +34,13 @@ async def list_sessions(dashboard_id: str = ""):
     sessions = agent_manager.get_all_sessions(dashboard_id=dashboard_id or None)
     return {"sessions": [s.model_dump(mode="json") for s in sessions]}
 
+@agents.router.get("/activity")
+async def agent_activity():
+    """How many agent tasks are live right now. Drives the desktop's idle-update gate so a
+    silent update-on-idle never lands on top of a running agent."""
+    active = sum(1 for t in agent_manager.tasks.values() if not t.done())
+    return {"active": active}
+
 @agents.router.get("/sessions/{session_id}")
 async def get_session(session_id: str):
     """Returns the session by id.

@@ -1,4 +1,4 @@
-const { app, components, BrowserWindow, ipcMain, shell, session, dialog, crashReporter } = require('electron');
+const { app, components, BrowserWindow, ipcMain, shell, session, dialog, crashReporter, powerMonitor } = require('electron');
 
 // E2E flag: when OPENSWARM_E2E=1, append a Chromium command-line switch the
 // renderer reads at startup to set window.__OPENSWARM_E2E__ = true BEFORE any
@@ -1607,6 +1607,38 @@ function setupAutoUpdater() {
   // Always-on users (lid never closes) miss the once-at-startup check
   // above. Re-check every 4h; coalesces if a download is already cached.
   setInterval(() => _runUpdateCheck('Periodic update check failed'), 4 * 60 * 60 * 1000);
+
+  // Evergreen catch-all: our keep-alive means the app rarely truly quits, so the staged
+  // update can sit unapplied for days. If one is downloaded AND the machine has been idle
+  // with NO agent running for a sustained stretch, swap to it silently via the same path
+  // the button uses. Deliberately conservative so it can never land on top of a live task.
+  const IDLE_INSTALL_MIN_IDLE_S = 30 * 60;
+  const IDLE_INSTALL_MIN_UPTIME_MS = 2 * 60 * 60 * 1000;
+  const _idleInstallStart = Date.now();
+  const _backendActiveAgents = () => new Promise((resolve) => {
+    if (!backendPort) return resolve(-1);
+    const req = http.request({
+      hostname: '127.0.0.1', port: backendPort, path: '/api/agents/activity', method: 'GET',
+      headers: { ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}) }, timeout: 4000,
+    }, (res) => {
+      let d = ''; res.on('data', (c) => (d += c));
+      res.on('end', () => { try { resolve(Number(JSON.parse(d).active)); } catch (_) { resolve(-1); } });
+    });
+    req.on('error', () => resolve(-1));
+    req.on('timeout', () => { req.destroy(); resolve(-1); });
+    req.end();
+  });
+  setInterval(async () => {
+    try {
+      if (isInstallingUpdate || !cachedUpdateStatus || cachedUpdateStatus.status !== 'downloaded') return;
+      if (Date.now() - _idleInstallStart < IDLE_INSTALL_MIN_UPTIME_MS) return;
+      if (powerMonitor.getSystemIdleTime() < IDLE_INSTALL_MIN_IDLE_S) return;
+      const active = await _backendActiveAgents();
+      if (active !== 0) return; // unknown (-1) or busy -> stay put, never interrupt a task
+      console.log('[updater] staged update + machine idle + no agents; applying silently');
+      installDownloadedUpdate();
+    } catch (_) { /* a heartbeat must never throw */ }
+  }, 5 * 60 * 1000);
 }
 
 function killBackend() {

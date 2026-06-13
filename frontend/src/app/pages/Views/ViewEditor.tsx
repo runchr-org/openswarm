@@ -29,8 +29,10 @@ import VisibilityOffIcon from '@mui/icons-material/VisibilityOff';
 import Collapse from '@mui/material/Collapse';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import { useAppDispatch, useAppSelector } from '@/shared/hooks';
+import { store } from '@/shared/state/store';
 import { createDraftSession, removeDraftSession, fetchSession } from '@/shared/state/agentsSlice';
-import { createOutput, updateOutput, fetchOutputs, Output, SERVE_BASE } from '@/shared/state/outputsSlice';
+import { createOutput, updateOutput, upsertOutput, fetchOutputs, Output, SERVE_BASE } from '@/shared/state/outputsSlice';
+import { truncateForTitle } from '@/shared/state/sessionDisplay';
 import { useClaudeTokens } from '@/shared/styles/ThemeContext';
 import AgentChat from '../AgentChat/AgentChat';
 import RefreshIcon from '@mui/icons-material/Refresh';
@@ -296,7 +298,7 @@ const ViewEditor: React.FC<Props> = ({ output }) => {
   const createdIdRef = useRef<string | null>(null);
   const effectiveId = output?.id ?? createdId;
 
-  const [name, setName] = useState(output?.name ?? '');
+  const [name, setName] = useState(output?.name || 'Untitled App');
   const [description, setDescription] = useState(output?.description ?? '');
 
   const initialFiles = useMemo<Record<string, string>>(() => {
@@ -562,8 +564,57 @@ const ViewEditor: React.FC<Props> = ({ output }) => {
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const lastPollRef = useRef<string>('');
 
-  const nameSetByMeta = useRef(false);
+  // Once true, meta.json syncs stop touching the field so a user rename isn't clobbered.
+  const nameSetByUserRef = useRef(false);
+  const descriptionSetByUserRef = useRef(false);
+
   const [fileVersion, setFileVersion] = useState(0);
+
+  const nameTypewriterCancelRef = useRef<(() => void) | null>(null);
+  const descTypewriterCancelRef = useRef<(() => void) | null>(null);
+
+  const driveTypewriter = useCallback((
+    target: string,
+    setter: React.Dispatch<React.SetStateAction<string>>,
+    userTypedRef: React.MutableRefObject<boolean>,
+    cancelRef: React.MutableRefObject<(() => void) | null>,
+    charDelayMs: number = 14,
+  ) => {
+    if (cancelRef.current) cancelRef.current();
+    let cancelled = false;
+    let timerId: ReturnType<typeof setTimeout> | null = null;
+    const tick = () => {
+      if (cancelled) return;
+      setter((prev) => {
+        if (userTypedRef.current) { cancelled = true; return prev; }
+        if (prev === target) { cancelled = true; return prev; }
+        let commonLen = 0;
+        while (commonLen < prev.length && commonLen < target.length && prev[commonLen] === target[commonLen]) commonLen++;
+        const next = prev.length > commonLen
+          ? prev.substring(0, prev.length - 1)
+          : target.substring(0, prev.length + 1);
+        if (next !== target) timerId = setTimeout(tick, charDelayMs);
+        return next;
+      });
+    };
+    timerId = setTimeout(tick, charDelayMs);
+    cancelRef.current = () => {
+      cancelled = true;
+      if (timerId) clearTimeout(timerId);
+    };
+  }, []);
+
+  const driveNameTypewriter = useCallback((target: string) => {
+    driveTypewriter(target, setName, nameSetByUserRef, nameTypewriterCancelRef);
+  }, [driveTypewriter]);
+  const driveDescriptionTypewriter = useCallback((target: string) => {
+    driveTypewriter(target, setDescription, descriptionSetByUserRef, descTypewriterCancelRef);
+  }, [driveTypewriter]);
+
+  useEffect(() => () => {
+    if (nameTypewriterCancelRef.current) nameTypewriterCancelRef.current();
+    if (descTypewriterCancelRef.current) descTypewriterCancelRef.current();
+  }, []);
 
   const pollWorkspace = useCallback(async () => {
     if (!workspaceId) return;
@@ -581,16 +632,24 @@ const ViewEditor: React.FC<Props> = ({ output }) => {
       }
 
       if (data.meta) {
-        if (data.meta.name && !nameSetByMeta.current) {
-          nameSetByMeta.current = true;
-          setName((prev) => prev || data.meta.name);
+        const eid = output?.id ?? createdIdRef.current;
+        if (data.meta.name && eid && !nameSetByUserRef.current) {
+          const row = store.getState().outputs.items[eid];
+          if (row && row.name !== data.meta.name) {
+            dispatch(upsertOutput({ ...row, name: data.meta.name }));
+            driveNameTypewriter(data.meta.name);
+          }
         }
-        if (data.meta.description) {
-          setDescription((prev) => prev || data.meta.description);
+        if (data.meta.description && eid && !descriptionSetByUserRef.current) {
+          const row = store.getState().outputs.items[eid];
+          if (row && row.description !== data.meta.description) {
+            dispatch(upsertOutput({ ...row, description: data.meta.description }));
+            driveDescriptionTypewriter(data.meta.description);
+          }
         }
       }
     } catch {}
-  }, [workspaceId]);
+  }, [workspaceId, output?.id, dispatch, driveNameTypewriter, driveDescriptionTypewriter]);
 
   useEffect(() => {
     if (!workspaceId) return;
@@ -1118,8 +1177,8 @@ const ViewEditor: React.FC<Props> = ({ output }) => {
         >
           <TextField
             value={name}
-            onChange={(e) => setName(e.target.value)}
-            placeholder="App name"
+            onChange={(e) => { nameSetByUserRef.current = true; setName(e.target.value); }}
+            placeholder="Untitled App"
             variant="standard"
             sx={{
               flex: 1,
@@ -1137,7 +1196,7 @@ const ViewEditor: React.FC<Props> = ({ output }) => {
 
           <TextField
             value={description}
-            onChange={(e) => setDescription(e.target.value)}
+            onChange={(e) => { descriptionSetByUserRef.current = true; setDescription(e.target.value); }}
             placeholder="Description"
             variant="standard"
             sx={{

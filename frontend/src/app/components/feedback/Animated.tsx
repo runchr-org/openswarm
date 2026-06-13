@@ -55,6 +55,63 @@ export function CrossFadeOnChange<T>({ value, children, durationMs }: CrossFadeP
   );
 }
 
+interface TypewriterProps {
+  value: string;
+  children: (current: string) => React.ReactNode;
+  charDelayMs?: number;
+  enabled?: boolean;
+  snapOnFirstTransition?: boolean;
+}
+
+export function Typewriter({ value, children, charDelayMs = 14, enabled = true, snapOnFirstTransition = false }: TypewriterProps) {
+  const reduced = useReducedMotion();
+  const [displayed, setDisplayed] = useState(value);
+  const targetRef = useRef(value);
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const hasTransitionedRef = useRef(false);
+
+  useEffect(() => {
+    targetRef.current = value;
+    if (!enabled || reduced) {
+      if (timerRef.current) { clearTimeout(timerRef.current); timerRef.current = null; }
+      setDisplayed(value);
+      if (value !== displayed) hasTransitionedRef.current = true;
+      return;
+    }
+    if (value === displayed) return;
+    if (snapOnFirstTransition && !hasTransitionedRef.current) {
+      hasTransitionedRef.current = true;
+      setDisplayed(value);
+      return;
+    }
+    hasTransitionedRef.current = true;
+    if (timerRef.current) clearTimeout(timerRef.current);
+    const tick = () => {
+      setDisplayed((prev) => {
+        const target = targetRef.current;
+        if (prev === target) return prev;
+        let commonLen = 0;
+        while (commonLen < prev.length && commonLen < target.length && prev[commonLen] === target[commonLen]) {
+          commonLen++;
+        }
+        const next = prev.length > commonLen
+          ? prev.substring(0, prev.length - 1)
+          : target.substring(0, prev.length + 1);
+        if (next !== target) {
+          timerRef.current = setTimeout(tick, charDelayMs);
+        }
+        return next;
+      });
+    };
+    timerRef.current = setTimeout(tick, charDelayMs);
+    return () => {
+      if (timerRef.current) { clearTimeout(timerRef.current); timerRef.current = null; }
+    };
+  }, [value, enabled, reduced, charDelayMs, snapOnFirstTransition, displayed]);
+
+  return <>{children(displayed)}</>;
+}
+
 interface TweeningNumberProps {
   value: number;
   /** How to render the tweened number. Default: `n.toString()`. */

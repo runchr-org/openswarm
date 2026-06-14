@@ -7,7 +7,7 @@ import { step05 } from './step05_agentUseBrowser';
 import { step06 } from './step06_agentControlAgents';
 import { step07 } from './step07_installSkill';
 import { step08 } from './step08_makeApp';
-import { welcomeNudgeStep } from './step00_welcomeNudge';
+import { welcomeOpenStep } from './step00_welcomeNudge';
 
 // Value-first order: launch an agent (step03) FIRST so a brand-new user sees
 // the product work on the free trial, then connect-your-own-model (step01).
@@ -25,7 +25,7 @@ export const STEPS: OnboardingStep[] = [
 
 // Resolvable by the Director but kept OUT of STEPS, so they never appear in the roadmap,
 // the panel count, or the unlock chain. The first-run welcome nudge lives here.
-const HIDDEN_STEPS: OnboardingStep[] = [welcomeNudgeStep];
+const HIDDEN_STEPS: OnboardingStep[] = [welcomeOpenStep];
 
 export function findStepById(id: string): OnboardingStep | undefined {
   return STEPS.find((s) => s.id === id) ?? HIDDEN_STEPS.find((s) => s.id === id);

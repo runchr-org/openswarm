@@ -1,18 +1,20 @@
 import type { OnboardingStep } from './types';
 import { S } from '../selectors';
 
-// Invisible first-run nudge (not part of the numbered tour): a beat after the welcome chat
-// pops, the cursor points at the top-right "Continue" pill so the user knows the guided tour
-// is there, then retreats. No click, no wait_user, so it's a one-shot gentle gesture.
-export const welcomeNudgeStep: OnboardingStep = {
-  id: 'welcome_nudge',
+// First-run, invisible to the roadmap: the cursor pops into existence (handled by fadeIn, with
+// the orange spark), pauses a beat, then moves to and clicks the New Agent button, which spawns
+// the welcome chat. Static, no LLM. The delays give the pop and the move room to breathe.
+export const welcomeOpenStep: OnboardingStep = {
+  id: 'welcome_open',
   stage: 'get_started',
   index: 0,
   title: 'Welcome',
   description: '',
   ops: [
-    { kind: 'move_to', target: S.onboardingContinueButton },
-    { kind: 'popup', text: 'Want a quick tour? Tap Continue any time.' },
+    { kind: 'delay', ms: 750 },                                   // let the pop + spark settle
+    { kind: 'move_to', target: S.newAgentButton },
+    { kind: 'delay', ms: 550 },                                   // pause, then click
+    { kind: 'click', target: S.newAgentButton, simulate: true },  // spawns the welcome chat
     { kind: 'outro' },
   ],
 };

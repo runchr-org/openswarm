@@ -130,10 +130,10 @@ export function useDashboardController(dashboardId: string, isActive: boolean) {
     restoredExpandedRef,
   });
 
-  // First-run: auto-pop a welcome chat (seeded greeting + chips) on the empty dashboard.
-  useWelcomeDraft({
+  // First-run: the onboarding cursor clicks New Agent -> handleNewAgent -> createWelcomeDraft,
+  // spawning the welcome chat. A manual New Agent click does the same when eligible.
+  const { welcomeEligible, createWelcomeDraft } = useWelcomeDraft({
     dashboardId,
-    isActive,
     canvasEmpty,
     expandedSessionIds,
     viewportRef: canvas.viewportRef,
@@ -233,6 +233,8 @@ export function useDashboardController(dashboardId: string, isActive: boolean) {
     setToolbarOpen,
     setAutoFocusSessionId,
     setPendingSelectSessionId,
+    welcomeEligible,
+    onWelcomeNewAgent: createWelcomeDraft,
   });
 
   const {

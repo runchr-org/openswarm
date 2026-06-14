@@ -1,16 +1,14 @@
-import { useEffect, useRef, type RefObject } from 'react';
+import { useCallback, type RefObject } from 'react';
 import { useAppDispatch, useAppSelector } from '@/shared/hooks';
 import { createDraftSession, expandSession } from '@/shared/state/agentsSlice';
 import { placeCard, DEFAULT_CARD_W, EXPANDED_CARD_MIN_H } from '@/shared/state/dashboardLayoutSlice';
 import { markWelcomeShown } from '@/shared/state/onboardingProgressSlice';
 import { hasFreeTrialActive, hasModelConnected } from '@/app/components/Onboarding/steps/skipPredicates';
-import { onboardingBus } from '@/app/components/Onboarding/eventBus';
 
 type SpawnOrigin = { x: number; y: number; type?: 'branch' };
 
 interface Args {
   dashboardId: string;
-  isActive: boolean;
   /** layoutInitialized && no sessions/views/browsers on the canvas. */
   canvasEmpty: boolean;
   expandedSessionIds: string[];
@@ -19,16 +17,14 @@ interface Args {
   spawnOriginsRef: RefObject<Record<string, SpawnOrigin>>;
 }
 
-// Once ever, for a genuinely fresh user with a way to run, auto-open a welcome chat card on the
-// empty dashboard: a seeded greeting + quick-reply chips, ZERO run consumed until they answer.
-// Fail-safe: any throw bails and the dashboard/chat keep working by hand.
+// First-run welcome chat. NOT auto-created: the onboarding cursor clicks the New Agent button,
+// which calls handleNewAgent -> createWelcomeDraft, so the chat is clicked into existence. The
+// user clicking New Agent by hand spawns the same thing (fail-safe). Returns the gate + creator.
 export function useWelcomeDraft({
-  dashboardId, isActive, canvasEmpty, expandedSessionIds,
-  viewportRef, canvasStateRef, spawnOriginsRef,
-}: Args): void {
+  dashboardId, canvasEmpty, expandedSessionIds, viewportRef, canvasStateRef, spawnOriginsRef,
+}: Args): { welcomeEligible: boolean; createWelcomeDraft: () => void } {
   const dispatch = useAppDispatch();
-  const createdRef = useRef(false);
-  const eligible = useAppSelector(
+  const reduxEligible = useAppSelector(
     (s) =>
       s.settings.loaded &&
       (hasFreeTrialActive(s) || hasModelConnected(s)) &&
@@ -36,20 +32,17 @@ export function useWelcomeDraft({
       !(s.onboardingProgress.completedSteps ?? []).includes('launch_agent'),
   );
   const model = useAppSelector((s) => s.settings.data.default_model);
+  const welcomeEligible = reduxEligible && canvasEmpty;
 
-  useEffect(() => {
-    if (createdRef.current) return;
-    if (!isActive || !canvasEmpty || !eligible) return;
-    createdRef.current = true;
+  const createWelcomeDraft = useCallback(() => {
     try {
-      // No seeded message: the greeting + chips render (and animate) inside the welcome chat
-      // via WelcomeQuickReplies, so nothing here can ever reach the backend.
+      // No seeded message: the greeting + chips render (and animate) inside the welcome chat,
+      // so nothing here can ever reach the backend.
       const action = dispatch(
         createDraftSession({ welcome: true, model, mode: 'agent', dashboardId, setActive: true }),
       );
       const draftId = action.payload.draftId;
 
-      // Center the card in the current viewport (canvas coords) so it pops in front of the user.
       const vp = viewportRef.current;
       const cs = canvasStateRef.current;
       if (vp && cs) {
@@ -68,9 +61,10 @@ export function useWelcomeDraft({
       }
       dispatch(expandSession(draftId));
       dispatch(markWelcomeShown());
-      onboardingBus.emit('welcome:shown');
     } catch (err) {
       console.error('[welcome-draft] create failed', err);
     }
-  }, [isActive, canvasEmpty, eligible, model, dashboardId, expandedSessionIds, dispatch, viewportRef, canvasStateRef, spawnOriginsRef]);
+  }, [dispatch, model, dashboardId, expandedSessionIds, viewportRef, canvasStateRef, spawnOriginsRef]);
+
+  return { welcomeEligible, createWelcomeDraft };
 }

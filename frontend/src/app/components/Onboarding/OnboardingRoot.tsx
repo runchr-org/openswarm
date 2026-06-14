@@ -18,7 +18,7 @@ import {
 import AgenticCursor, { type AgenticCursorHandle } from './ac/AgenticCursor';
 import { onboardingDirector } from './OnboardingDirector';
 import { STEPS } from './steps';
-import { hasAnyAgentCompleted } from './steps/skipPredicates';
+import { hasAnyAgentCompleted, hasFreeTrialActive, hasModelConnected } from './steps/skipPredicates';
 import OnboardingPanel from './OnboardingPanel';
 import { onboardingBus } from './eventBus';
 import { report } from './telemetry';
@@ -50,22 +50,31 @@ const OnboardingRoot: React.FC = () => {
     dispatch,
   ]);
 
-  // First-run cursor nudge: a beat after the welcome chat pops, the cursor points at the
-  // top-right "Continue" pill. Armed by the once-ever 'welcome:shown' event (so it never
-  // re-fires across reloads), fail-safe (a missing AC / off-dashboard route just no-ops).
-  const nudgeFiredRef = useRef(false);
-  const nudgeTimerRef = useRef<number | null>(null);
+  // First run: the cursor pops into existence, pauses, then moves to and clicks the New Agent
+  // button (welcome_open step) which spawns the welcome chat. Fires once, only on the dashboard
+  // with a way to run and nothing launched yet. Fail-safe: if the cursor can't run, a manual
+  // New Agent click spawns the same welcome chat (handleNewAgent is welcome-aware).
+  const welcomeOpenReady = useAppSelector(
+    (s) =>
+      s.settings.loaded &&
+      (hasFreeTrialActive(s) || hasModelConnected(s)) &&
+      !s.onboardingProgress.welcomeShown &&
+      !(s.onboardingProgress.completedSteps ?? []).includes('launch_agent') &&
+      Object.keys(s.agents?.sessions ?? {}).length === 0,
+  );
+  const welcomeFiredRef = useRef(false);
+  const welcomeTimerRef = useRef<number | null>(null);
   useEffect(() => {
-    const off = onboardingBus.on('welcome:shown', () => {
-      if (nudgeFiredRef.current || !window.location.hash.includes('/dashboard/')) return;
-      nudgeFiredRef.current = true;
-      nudgeTimerRef.current = window.setTimeout(() => {
-        if (!window.location.hash.includes('/dashboard/') || onboardingDirector.isRunning()) return;
-        onboardingDirector.startStep('welcome_nudge', { x: window.innerWidth - 120, y: 80 });
-      }, 1000);
-    });
-    return () => { off(); if (nudgeTimerRef.current) window.clearTimeout(nudgeTimerRef.current); };
-  }, []);
+    if (welcomeFiredRef.current || !progress.initialized || !welcomeOpenReady) return;
+    if (!window.location.hash.includes('/dashboard/') || onboardingDirector.isRunning()) return;
+    welcomeFiredRef.current = true;
+    welcomeTimerRef.current = window.setTimeout(() => {
+      if (!window.location.hash.includes('/dashboard/') || onboardingDirector.isRunning()) return;
+      // Pop near center, then the step walks the cursor down to the New Agent button and clicks.
+      onboardingDirector.startStep('welcome_open', { x: window.innerWidth / 2, y: window.innerHeight / 2 });
+    }, 600);
+    return () => { if (welcomeTimerRef.current) window.clearTimeout(welcomeTimerRef.current); };
+  }, [progress.initialized, welcomeOpenReady]);
 
   useEffect(() => {
     if (progress.initialized) return;

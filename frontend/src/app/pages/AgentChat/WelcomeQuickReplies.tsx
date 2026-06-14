@@ -36,9 +36,9 @@ const WelcomeQuickReplies: React.FC<{
   onPick: (prompt: string) => void;
   onPickBuilder: (prompt: string) => void;
 }> = ({ c, onPick, onPickBuilder }) => {
-  // Slow + delayed so it reads as a sequence: card pops, the header title streams, THEN
-  // the greeting types, THEN the chips pop in.
-  const { shown: greeting, done: greetingDone } = useTypewriter(GREETING, 46, 650);
+  // Slow + delayed so it reads as a calm sequence: card pops, the header title streams, THEN
+  // the greeting types out unhurried, THEN the chips pop in.
+  const { shown: greeting, done: greetingDone } = useTypewriter(GREETING, 78, 850);
   const [expanded, setExpanded] = React.useState<string | null>(null);
   const currentCategory = STARTER_CATEGORIES.find((cat) => cat.id === expanded);
   const isAppBuilder = currentCategory?.target === 'app-builder';
@@ -88,7 +88,7 @@ const WelcomeQuickReplies: React.FC<{
                       onClick={() => setExpanded(cat.id)}
                       initial={{ opacity: 0, scale: 0.82 }}
                       animate={{ opacity: 1, scale: 1 }}
-                      transition={{ type: 'spring', stiffness: 420, damping: 22, delay: 0.18 + i * 0.14 }}
+                      transition={{ type: 'spring', stiffness: 420, damping: 22, delay: 0.25 + i * 0.18 }}
                       style={{
                         display: 'flex', alignItems: 'center', gap: 8,
                         padding: '10px 14px',

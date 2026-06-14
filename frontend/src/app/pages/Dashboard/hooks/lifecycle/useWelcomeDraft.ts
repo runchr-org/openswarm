@@ -1,7 +1,7 @@
 import { useCallback, type RefObject } from 'react';
 import { useAppDispatch, useAppSelector } from '@/shared/hooks';
 import { createDraftSession, expandSession } from '@/shared/state/agentsSlice';
-import { placeCard, DEFAULT_CARD_W, EXPANDED_CARD_MIN_H } from '@/shared/state/dashboardLayoutSlice';
+import { placeCard, setCardPosition, DEFAULT_CARD_W, EXPANDED_CARD_MIN_H } from '@/shared/state/dashboardLayoutSlice';
 import { markWelcomeShown } from '@/shared/state/onboardingProgressSlice';
 import { hasFreeTrialActive, hasModelConnected } from '@/app/components/Onboarding/steps/skipPredicates';
 
@@ -49,15 +49,19 @@ export function useWelcomeDraft({
         const vr = vp.getBoundingClientRect();
         const cx = (vr.width / 2 - cs.panX) / cs.zoom;
         const cy = (vr.height / 2 - cs.panY) / cs.zoom;
+        const x = cx - DEFAULT_CARD_W / 2;
+        const y = cy - EXPANDED_CARD_MIN_H / 2;
         if (spawnOriginsRef.current) spawnOriginsRef.current[draftId] = { x: cx, y: cy };
         dispatch(placeCard({
           sessionId: draftId,
-          x: cx - DEFAULT_CARD_W / 2,
-          y: cy - EXPANDED_CARD_MIN_H / 2,
+          x, y,
           width: DEFAULT_CARD_W,
           height: EXPANDED_CARD_MIN_H,
           expandedSessionIds,
         }));
+        // placeCard grid-snaps + dodges collisions; the welcome chat is the only thing on a
+        // fresh dashboard, so pin it to the EXACT viewport center instead of a grid cell.
+        dispatch(setCardPosition({ sessionId: draftId, x, y }));
       }
       dispatch(expandSession(draftId));
       dispatch(markWelcomeShown());

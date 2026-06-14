@@ -1673,6 +1673,27 @@ function killBackend() {
   }
 }
 
+// macOS only: dodge the Chromium RootView::UpdateCursor null-deref (a browser-process
+// SIGSEGV when the mouse is released OUTSIDE the window mid-drag, easy with a second
+// display) by snapping off-window releases to the window edge before Chromium hit-tests
+// them. The fault is upstream of our renderer so JS can't catch it; this native addon
+// sits on an AppKit local event monitor. Fail-open: any miss leaves behavior as today.
+function installMacMouseClamp() {
+  if (process.platform !== 'darwin') return;
+  try {
+    const nodePath = isPackaged
+      ? path.join(process.resourcesPath, 'mouseclamp', 'mouseclamp.node')
+      : path.join(__dirname, 'build-staging', 'mouseclamp', process.arch, 'mouseclamp.node');
+    if (!fs.existsSync(nodePath)) {
+      console.log('[mouseclamp] addon not present, skipping:', nodePath);
+      return;
+    }
+    console.log('[mouseclamp] install =>', require(nodePath).install());
+  } catch (e) {
+    console.log('[mouseclamp] install failed (continuing):', e && e.message);
+  }
+}
+
 app.whenReady().then(async () => {
   // We made it here, so any prior update swap finished. Drop a stale updating.lock
   // (the watchdog never deletes it) so a real crash later isn't silently swallowed.
@@ -1681,6 +1702,9 @@ app.whenReady().then(async () => {
   // app continues normally (silent fail by design). Guards inside the
   // watchdog itself prevent false-positive relaunches.
   spawnCrashWatchdog();
+
+  // Off-window mouse-release crash dodge (macOS). Safe to call before windows exist.
+  installMacMouseClamp();
 
   // Cold-launch: if the OS opened us via openswarm:// (Windows/Linux it's
   // in argv; macOS fires open-url AFTER whenReady which we handle above)

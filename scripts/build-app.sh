@@ -459,6 +459,16 @@ cd "$PROJECT_ROOT/electron"
 # npm ci: lockfile-exact, no drift. See frontend note above.
 npm ci
 
+# macOS mouse-clamp native addon: compile both arches into build-staging/mouseclamp/<arch>
+# so extraResources (mouseclamp/${arch}) is populated whichever target gets packed.
+# Cheap (~2s each); fails the build loudly if a slice can't compile rather than
+# silently shipping the crash. macOS-only.
+if [[ "$(uname)" == "Darwin" ]]; then
+    echo "Building mouse-clamp native addon (arm64 + x64)..."
+    bash scripts/build-mouseclamp.sh arm64
+    bash scripts/build-mouseclamp.sh x64
+fi
+
 # Node's default ~4 GB heap OOMs while codesign'ing the .app on dual-arch
 # publish runs (the .app is ~4.8 GB and electron-builder walks every file
 # to hash + sign, holding paths + metadata in memory). Bump the old-space

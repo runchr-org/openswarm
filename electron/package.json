@@ -149,6 +149,13 @@
         ]
       },
       {
+        "from": "build-staging/mouseclamp/${arch}",
+        "to": "mouseclamp",
+        "filter": [
+          "**/*"
+        ]
+      },
+      {
         "from": "build-staging/uv-bin/${arch}",
         "to": "backend/uv-bin",
         "filter": [

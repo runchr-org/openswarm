@@ -1,10 +1,12 @@
-import { Search, Hammer, PenLine, GraduationCap } from 'lucide-react';
+import { Search, Hammer, Globe, Plug } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 
 // Two-level starters shared by the empty-state and the first-run welcome chat: pick a
-// category, then its concrete prompts. Every prompt is one-click-runnable (no [placeholders])
-// and free-trial-safe, it touches the web or the App Builder sandbox, never the user's files.
-// target 'app-builder' opens the App Builder (live preview); the rest run as a normal agent.
+// category, then a concrete prompt. These are chosen to SHOWCASE what makes OpenSwarm
+// different from a plain chatbot, real apps (App Builder), the browser agent, your own
+// tools (MCPs), the file harness (PDFs/exports), and parallel agents on the canvas. Every
+// prompt is one-click-runnable (no [placeholders]) and reads plainly for a non-dev.
+// target 'app-builder' opens the App Builder (live preview); the rest run as an agent.
 export type StarterCategory = {
   id: string;
   label: string;
@@ -15,39 +17,43 @@ export type StarterCategory = {
 
 export const STARTER_CATEGORIES: StarterCategory[] = [
   {
+    // Web research that ends in a real artifact + parallel agents on the canvas.
     id: 'research', label: 'Research', Icon: Search,
     prompts: [
-      'Find today\'s top news and summarize it for me',
-      'Compare the 3 best standing desks and recommend one',
-      'Plan a weekend trip to Tokyo with a day-by-day itinerary',
-      'Find the strangest world record I could actually break',
+      'Plan a 3-day Tokyo trip and turn it into a printable PDF itinerary',
+      'Compare the 5 best robot vacuums and make me a one-page buying guide',
+      'Spin up 3 agents to research 3 competitors at once and tell me who wins',
+      "Find the latest on a topic I'll name and write me a brief with real sources",
     ],
   },
   {
-    id: 'build', label: 'Build', Icon: Hammer, target: 'app-builder',
+    // The App Builder is a full app (logic + data + live preview), not a toy snippet.
+    id: 'build', label: 'Build an app', Icon: Hammer, target: 'app-builder',
     prompts: [
-      'Build a focus timer that dings when the break starts',
-      'Make a tip calculator that splits the bill',
-      'Create a Snake game I can play right now',
-      'Build a tiny Minecraft-style block world I can walk around in',
+      'Build a working expense tracker app with live charts',
+      'Make a Snake game I can actually play right now',
+      'Build a habit tracker that remembers my streaks between visits',
+      'Create a little 3D block world I can walk around in',
     ],
   },
   {
-    id: 'write', label: 'Write', Icon: PenLine,
+    // The browser agent: OpenSwarm's most powerful tool, it actually drives the web.
+    id: 'browse', label: 'Use the web', Icon: Globe,
     prompts: [
-      'Write a friendly email introducing myself to a new client',
-      'Turn my rough notes into a polished update',
-      'Write a product description for a coffee mug',
-      'Write my morning routine as an epic fantasy quest',
+      'Send an agent to find the cheapest flights to Tokyo and show me the best options',
+      'Have an agent pull a clean list of the top-rated coffee shops in a city',
+      'Find 3 well-reviewed standing desks online and screenshot the best one',
+      'Watch an agent sign me up for a free newsletter on a site',
     ],
   },
   {
-    id: 'learn', label: 'Learn', Icon: GraduationCap,
+    // MCPs: plug your real tools in and let agents work across them.
+    id: 'connect', label: 'Connect your apps', Icon: Plug,
     prompts: [
-      'Explain how AI chatbots actually work, in plain English',
-      'Teach me the basics of investing in 5 minutes',
-      'Explain the stock market like I\'m five',
-      'What would happen if the moon disappeared tomorrow?',
+      'Summarize my Gmail inbox and flag what actually needs a reply',
+      'Turn my Notion notes into a clear action plan',
+      'Look at my calendar and lay out a realistic plan for my week',
+      'Pull a sheet from my Google Drive and chart what matters',
     ],
   },
 ];

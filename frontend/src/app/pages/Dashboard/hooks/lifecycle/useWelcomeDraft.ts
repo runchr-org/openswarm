@@ -1,16 +1,12 @@
 import { useEffect, useRef, type RefObject } from 'react';
 import { useAppDispatch, useAppSelector } from '@/shared/hooks';
-import { createDraftSession, expandSession, type AgentMessage } from '@/shared/state/agentsSlice';
+import { createDraftSession, expandSession } from '@/shared/state/agentsSlice';
 import { placeCard, DEFAULT_CARD_W, EXPANDED_CARD_MIN_H } from '@/shared/state/dashboardLayoutSlice';
 import { markWelcomeShown } from '@/shared/state/onboardingProgressSlice';
 import { hasFreeTrialActive, hasModelConnected } from '@/app/components/Onboarding/steps/skipPredicates';
 import { onboardingBus } from '@/app/components/Onboarding/eventBus';
 
 type SpawnOrigin = { x: number; y: number; type?: 'branch' };
-
-// The proactive first-run greeting (static, no LLM). Seeded into the draft only; it never
-// reaches the backend (launchAndSendFirstMessage.fulfilled swaps the draft for the server session).
-const GREETING = "Hi, I'm your AI team. What do you want done?";
 
 interface Args {
   dashboardId: string;
@@ -46,16 +42,10 @@ export function useWelcomeDraft({
     if (!isActive || !canvasEmpty || !eligible) return;
     createdRef.current = true;
     try {
-      const greeting: AgentMessage = {
-        id: 'welcome-greeting',
-        role: 'assistant',
-        content: GREETING,
-        timestamp: new Date().toISOString(),
-        branch_id: 'main',
-        parent_id: null,
-      };
+      // No seeded message: the greeting + chips render (and animate) inside the welcome chat
+      // via WelcomeQuickReplies, so nothing here can ever reach the backend.
       const action = dispatch(
-        createDraftSession({ welcome: true, seededMessages: [greeting], model, mode: 'agent', dashboardId, setActive: true }),
+        createDraftSession({ welcome: true, model, mode: 'agent', dashboardId, setActive: true }),
       );
       const draftId = action.payload.draftId;
 

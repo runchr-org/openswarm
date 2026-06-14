@@ -1520,6 +1520,15 @@ const AgentChat: React.FC<AgentChatProps> = ({ sessionId: sessionIdProp, onClose
             }}
           >
             <Box>
+            {/* First-run welcome: the greeting streams in, the chips pop in; vanishes the
+                moment a user message exists (i.e. once they answer). Pure UI, no run. */}
+            {session.is_welcome_draft && isDraft && !session.messages.some((m) => m.role === 'user') && (
+              <WelcomeQuickReplies
+                c={c}
+                onPick={(p) => handleSend(p)}
+                onPickBuilder={(p) => chatInputRef.current?.setContent(p)}
+              />
+            )}
             {(session.mcp_suggestions && session.mcp_suggestions.length > 0) && (
               <Box sx={{
                 mt: 1,
@@ -1848,15 +1857,6 @@ const AgentChat: React.FC<AgentChatProps> = ({ sessionId: sessionIdProp, onClose
                   </Typography>
                 </Box>
               </Box>
-            )}
-            {/* First-run welcome: quick-reply chips under the seeded greeting; vanish the
-                moment a user message exists (i.e. once they answer). */}
-            {session.is_welcome_draft && isDraft && !session.messages.some((m) => m.role === 'user') && (
-              <WelcomeQuickReplies
-                c={c}
-                onPick={(p) => handleSend(p)}
-                onPickBuilder={(p) => chatInputRef.current?.setContent(p)}
-              />
             )}
             </Box>
           </Box>

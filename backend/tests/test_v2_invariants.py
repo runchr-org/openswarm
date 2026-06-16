@@ -467,6 +467,10 @@ async def test_resolve_aux_model_anthropic_pro_returns_proxy():
     settings = AppSettings()
     settings.connection_mode = "openswarm-pro"
     settings.openswarm_proxy_url = "https://api.openswarm.test"
+    # A real Pro-connected user carries a bearer token; proxy_auth reads it.
+    # Without it the resolver can't see Pro and falls through to the raise,
+    # which is what made this test depend on live machine state.
+    settings.openswarm_bearer_token = "test-pro-token"
     with patch("backend.apps.nine_router.is_running", return_value=False):
         model_id, base = await registry.resolve_aux_model(settings)
         assert "haiku" in model_id
@@ -1205,6 +1209,7 @@ async def test_aux_failover_anthropic_to_codex():
     settings = AppSettings()
     settings.connection_mode = "openswarm-pro"  # provides anthropic fallback
     settings.openswarm_proxy_url = "https://api.openswarm.test"
+    settings.openswarm_bearer_token = "test-pro-token"  # what a real Pro user carries
     with patch("backend.apps.nine_router.is_running", return_value=True), \
          patch("backend.apps.nine_router.get_providers",
                new=AsyncMock(return_value=[])):  # nothing connected

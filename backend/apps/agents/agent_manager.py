@@ -23,6 +23,7 @@ from backend.apps.tools_lib.tools_lib import (
     refresh_airtable_token,
     refresh_google_token,
     refresh_hubspot_token,
+    save_builtin_permissions,
     save_trusted_sensitive_paths,
 )
 from backend.config.paths import SESSIONS_DIR
@@ -787,6 +788,17 @@ class AgentManager:
                         save_trusted_sensitive_paths(existing)
                 except Exception:
                     logger.exception("Failed to persist trusted sensitive path")
+
+            # "Always approve" button: persist the tool's policy so it stops
+            # prompting. The guards above (sensitive/catastrophic) re-fire even
+            # on always_allow, so this can't disarm an rm -rf or a key-path write.
+            if decision.get("behavior") == "allow" and decision.get("set_always_allow"):
+                try:
+                    perms = load_builtin_permissions()
+                    perms[tool_name] = "always_allow"
+                    save_builtin_permissions(perms)
+                except Exception:
+                    logger.exception("Failed to persist always-allow for %s", tool_name)
 
             approval_latency_ms = int((datetime.now() - approval_req.created_at).total_seconds() * 1000)
             try:

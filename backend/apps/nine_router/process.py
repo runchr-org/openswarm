@@ -57,6 +57,11 @@ NINE_ROUTER_NPM_VERSION = os.environ.get("OPENSWARM_ROUTER_VERSION", "0.3.60")
 
 _process: subprocess.Popen | None = None
 
+# Serializes ensure_running() so a background auto-start and a concurrent
+# dispatch-time ensure can't both spawn 9Router (double-bind on :20128). Lazily
+# created so module import doesn't require a running event loop.
+_start_lock: "asyncio.Lock | None" = None
+
 # Short TTL cache for positive is_running() results. The probe is a sync
 # httpx.get that blocks the event loop, and under load (9Router busy
 # streaming inference) it can exceed its 2s timeout and return False even
@@ -334,6 +339,16 @@ def _report_start_failure(reason: str, *, detail: str = "", **fields: Any) -> No
 
 
 async def ensure_running():
+    """Start 9Router if not already running. Serialized so concurrent callers
+    (the background auto-start + a dispatch-time ensure) can't double-spawn."""
+    global _start_lock
+    if _start_lock is None:
+        _start_lock = asyncio.Lock()
+    async with _start_lock:
+        await _ensure_running_impl()
+
+
+async def _ensure_running_impl():
     """Start 9Router if not already running."""
     global _process
     _is_packaged = os.environ.get("OPENSWARM_PACKAGED") == "1"

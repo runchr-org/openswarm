@@ -847,6 +847,9 @@ class AgentManager:
         # Counts ToolSearch calls in a row (no other tool between them). A run
         # of these with empty results is the "looping on ToolSearch" wedge.
         _ts_loop = {"n": 0}
+        # One mid-run connect offer per session: a stuck agent fires the loop-breaker repeatedly,
+        # but the user should see the "connect this MCP" card once, not on every retry.
+        _mcp_offer_sent = {"done": False}
 
         async def pre_tool_hook(input_data, tool_use_id, context):
             tool_name = input_data.get("tool_name", "")
@@ -862,12 +865,29 @@ class AgentManager:
             if tool_name == "ToolSearch":
                 _ts_loop["n"] += 1
                 if _ts_loop["n"] >= TOOLSEARCH_LOOP_THRESHOLD:
-                    _reason = toolsearch_loop_redirect(
-                        _ts_loop["n"],
-                        self._gated_mcp_server_names(session.allowed_tools, session.active_mcps),
-                    )
+                    _gated = self._gated_mcp_server_names(session.allowed_tools, session.active_mcps)
+                    _reason = toolsearch_loop_redirect(_ts_loop["n"], _gated)
                     if _reason:
                         logger.info(f"[MCP-DEBUG] ToolSearch loop-breaker fired for {session_id} (n={_ts_loop['n']})")
+                        # 2B-MCP: also surface a one-click connect offer to the USER for the vetted
+                        # gated servers the agent keeps reaching for. Suggest-only: this just shows a
+                        # card on the same channel the preflight uses; activation still requires
+                        # MCPActivate + the dispatch gate, so it opens no side channel. Once per run,
+                        # fail-open (an offer hiccup must never block the agent).
+                        if not _mcp_offer_sent["done"]:
+                            try:
+                                from backend.apps.agents.core.mcp_preflight import offer_for_gated_server
+                                _s = load_settings()
+                                _offers = [o for o in (offer_for_gated_server(n, _s) for n in _gated) if o]
+                                if _offers:
+                                    _mcp_offer_sent["done"] = True
+                                    await ws_manager.send_to_session(session_id, "agent:mcp_suggestions", {
+                                        "session_id": session_id,
+                                        "suggestions": _offers,
+                                        "is_vague": False,
+                                    })
+                            except Exception:
+                                logger.debug("mid-run MCP connect offer skipped", exc_info=True)
                         return {
                             "hookSpecificOutput": {
                                 "hookEventName": hook_event,

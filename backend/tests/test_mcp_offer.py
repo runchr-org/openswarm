@@ -22,13 +22,16 @@ def _settings(dismissed=None):
     return SimpleNamespace(dismissed_mcp_suggestions=dismissed or {})
 
 
-def test_offer_only_returns_vetted_inactive(monkeypatch):
+def test_offer_resolves_both_display_name_and_hotpath_slug(monkeypatch):
+    # The hot-path passes a sanitized slug ("google-workspace"); the curated id is a display
+    # name ("Google Workspace"). Both must resolve, so the wiring isn't a load-bearing string.
     monkeypatch.setattr(pf, "load_all_tools", lambda: [])  # nothing enabled
     s = _settings()
-    o = offer_for_gated_server("Google Workspace", s)
-    assert o is not None
-    assert o["id"] == "Google Workspace"
-    assert o["id"] in VETTED
+    for name in ("Google Workspace", "google-workspace"):
+        o = offer_for_gated_server(name, s)
+        assert o is not None, f"{name!r} should resolve to the vetted entry"
+        assert o["id"] == "Google Workspace"
+        assert o["id"] in VETTED
 
 
 def test_offer_rejects_unvetted_and_empty(monkeypatch):

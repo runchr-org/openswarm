@@ -12,6 +12,7 @@ from backend.apps.agents.providers.registry import resolve_aux_model
 from backend.apps.settings.credentials import get_anthropic_client_for_model
 from backend.apps.settings.settings import load_settings
 from backend.apps.tools_lib.tools_lib import _load_all as load_all_tools
+from backend.apps.tools_lib.mcp_config import _sanitize_server_name
 
 logger = logging.getLogger(__name__)
 
@@ -146,7 +147,13 @@ def offer_for_gated_server(server_name: str, settings) -> CuratedEntry | None:
     server is vetted AND inactive AND not dismissed, reusing the same filter as the preflight."""
     if not server_name or not isinstance(server_name, str):
         return None
-    entry = next((e for e in _build_available_shortlist(settings) if e["id"] == server_name), None)
+    # The hot-path hands us a sanitized slug ("google-workspace"); curated ids are display names
+    # ("Google Workspace"). Match on the slug of both sides so neither form is a load-bearing string.
+    slug = _sanitize_server_name(server_name)
+    entry = next(
+        (e for e in _build_available_shortlist(settings) if _sanitize_server_name(e["id"]) == slug),
+        None,
+    )
     if entry is None:
         return None
     return {"id": entry["id"], "title": entry["title"], "description": entry["description"], "reason": ""}

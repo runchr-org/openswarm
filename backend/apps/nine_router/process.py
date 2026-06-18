@@ -359,11 +359,9 @@ async def ensure_running():
     """Start 9Router if not already running. Serialized so concurrent callers
     (the background auto-start + a dispatch-time ensure) can't double-spawn."""
     global _start_lock
-    logger.info("[perf] bg 9r.ensure_running entered")
     if _start_lock is None:
         _start_lock = asyncio.Lock()
     async with _start_lock:
-        logger.info("[perf] bg 9r.ensure_running past lock")
         await _ensure_running_impl()
 
 
@@ -395,10 +393,8 @@ async def _ensure_running_impl():
         else:
             logger.info("9Router already running on port %d", NINE_ROUTER_PORT)
             return
-    logger.info("[perf] bg 9r past is_running()")
     _9router_dir = _find_9router_dir()
     _patch = _gpt5_patch_path()
-    logger.info("[perf] bg 9r found dir+patch")
 
     if _is_packaged:
         # Packaged: run the pre-built standalone server staged at
@@ -414,7 +410,6 @@ async def _ensure_running_impl():
         if not os.path.exists(standalone_server):
             _report_start_failure("server_missing", router_dir_found=True)
             return
-        logger.info("[perf] bg 9r pre find_node")
         node = _find_node()
         if not node:
             _report_start_failure("node_not_found", router_dir_found=True, server_found=True)

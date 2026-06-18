@@ -344,3 +344,51 @@ Status: warm 5.0s (under goal), cold ~22s (75-84% below the 54-138s baseline), b
 bugs fixed/verified on the signed build. The cold residual is either accepted as
 first-run-only OS I/O, or pinned definitively by one more build that ships this
 instrumentation. Build-gated (user manages tags/release), so not auto-built.
+
+## [SOLVED 2026-06-18] cold ~22s -> 3.86s: synchronous is_running() froze the event loop
+
+The per-lifespan instrumentation (v1.3.88) overturned every prior hypothesis: all
+16 lifespans enter in ~120ms even COLD. The ~18s cold cost was entirely AFTER
+lifespan startup, in a backgrounded create_task that synchronously blocked the
+single asyncio event loop, so uvicorn could not answer the health probe.
+
+Finer instrumentation (v1.3.89) split it into two stalls (~13s before any bg task,
+~5s in 9Router ensure). faulthandler (`dump_traceback_later`, v1.3.90) on the
+signed cold build caught the loop thread frozen, three times, in the SAME call:
+
+```
+socket.create_connection            <- stuck >7s
+httpx ... get
+backend/apps/nine_router/process.py:83  is_running()   <- synchronous httpx.get
+  <- sync_openswarm_pro_as_claude / sync_custom_providers (settings._boot_router_then_sync)
+  <- _ensure_running_impl (ensure_running)
+```
+
+ROOT CAUSE: `is_running()` did a synchronous `httpx.get("http://localhost:20128/...")`.
+It is called ~5x on the cold boot path (the settings key-sync sequence + the
+9Router ensure) BEFORE 9Router is up. On Windows a dead-port connect to
+"localhost" stalls ~7s each: getaddrinfo returns `::1` first, and the loopback
+refusal is slow (measured: a refused connect is ~2s/address, and localhost =
+`::1`+`127.0.0.1` = ~4s; cold ~7s). ~5 serial probes = the ~18s freeze.
+
+This is why every earlier hypothesis missed: it is not disk, not Defender, not
+file-count, not the DEBUGLETON scan, not imports, not the lifespans. It is one
+synchronous network probe on the event loop, repeated.
+
+FIX (v1.3.91, `process.py` is_running): probe `127.0.0.1` with a 0.3s TCP timeout
+first (a short timeout caps the slow Windows refusal: measured 306ms vs ~7s); only
+HTTP-confirm when the port is open. 9Router binds `0.0.0.0` (the warm app reaches
+it via `127.0.0.1`), so reachability is unchanged, only the dead-port wait dies.
+
+VERIFIED on the real signed build (this Windows 11 box, fresh Squirrel install):
+
+| metric | baseline | before fix (1.3.90) | after fix (1.3.91) |
+| --- | --- | --- | --- |
+| cold backend-http-ready | 54-138s | 23.5s | **3.86s** |
+| warm backend-http-ready | 9-10s | 5.0s | **3.32s** |
+
+Cold is now ~97% below baseline and well under the 10s goal; warm improved too
+(the same localhost stall taxed it). 9Router still starts successfully via the new
+probe (no regression). The diagnostic `[perf] bg` logs + faulthandler were removed
+after diagnosis; the lightweight per-lifespan timer stays (prints only a lifespan
+over 50ms + the total) as a cheap regression tripwire.

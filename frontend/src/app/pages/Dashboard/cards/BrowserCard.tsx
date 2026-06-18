@@ -1184,6 +1184,10 @@ const BrowserCard: React.FC<Props> = ({
                   border: 'none',
                   visibility: tab.id === activeTabId ? 'visible' : 'hidden',
                   zIndex: tab.id === activeTabId ? 1 : 0,
+                  // Only during select mode does the page go click-through, so the element
+                  // picker can grab the whole card from anywhere instead of just the header
+                  // (a live webview swallows host clicks). Off select mode = live for browsing.
+                  pointerEvents: isElementSelectMode ? 'none' : 'auto',
                 }}
               />
             ))}
@@ -1305,7 +1309,7 @@ const BrowserCard: React.FC<Props> = ({
             <iframe
               src={activeUrl}
               // No sandbox: a restrictive sandbox blocks some sites from rendering, and our renderer is already isolated by Electron's contextIsolation + sub_frame XFO/CSP frame-ancestors strip in main.js. onLoad/onError add definitive instrumentation so we can tell whether the iframe loaded successfully (with empty body from anti-iframe JS) or genuinely failed (network error, CSP block, etc.).
-              style={{ width: '100%', height: '100%', border: 'none' }}
+              style={{ width: '100%', height: '100%', border: 'none', pointerEvents: isElementSelectMode ? 'none' : 'auto' }}
               title="Browser"
               referrerPolicy="no-referrer-when-downgrade"
               onError={(e) => {

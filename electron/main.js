@@ -1269,40 +1269,27 @@ function createWindow() {
   // closing windows as part of its pipeline.
   mainWindow.on('close', (e) => {
     console.log(`[diag][main] mainWindow close (quitInitiated=${quitInitiated})`);
-    // macOS close-to-dock: a close that is not part of a real quit (Cmd+Q,
-    // dock Quit, logout, updater — all fire before-quit first, flipping
-    // quitInitiated) gets prevented and the window HIDES instead. This keeps
-    // the renderer, webviews, and running agents fully alive, so both the
-    // user's Cmd+W/red-X and the un-attributed programmatic closer behind
-    // the 1.2.77 self-quits cost nothing: the next dock click shows the
-    // same window back instantly (`activate` below). Real quits must pass
-    // through — preventing a close during app.quit() cancels the quit
-    // (Electron semantics), which is exactly what the flag guards against.
-    // isInstallingUpdate must pass through: native quitAndInstall TERMINATES the app
-    // by closing the window (with quitInitiated still false), so intercepting it here
-    // hides the window and strands the update uninstalled. That was THE bug behind
-    // "Restart & Update does nothing" on Mac. Let that close (and real quits) through.
+    // macOS: the only way to land here with quitInitiated still false is the red
+    // traffic-light button. Cmd+W is swallowed in before-input-event, renderer
+    // window.close() is neutered above, and crash-recovery uses destroy() (which
+    // skips 'close'). So a red-button click means "quit": route it through
+    // app.quit() so before-quit drains the App Builder subprocesses and will-quit
+    // kills the backend, instead of leaving a headless app running. Real quits
+    // (Cmd+Q, dock Quit, logout) flip quitInitiated via before-quit first and pass
+    // straight through. isInstallingUpdate must also pass through: native
+    // quitAndInstall closes the window with quitInitiated still false, and
+    // intercepting it strands the update (THE "Restart & Update does nothing" bug).
     if (process.platform === 'darwin' && !quitInitiated && !isInstallingUpdate) {
       e.preventDefault();
-      // A staged update waiting + a user close = "apply it on the way out". Kick off
-      // the install (arms ShipIt + drives a real quit) instead of just hiding, so the
-      // red button finally updates instead of looping.
+      // A staged update waiting + a user close = "apply it on the way out": the
+      // install arms ShipIt and drives its own quit, so update instead of quitting.
       if (cachedUpdateStatus && cachedUpdateStatus.status === 'downloaded') {
         console.log('[updater] close with a staged update; applying it');
         installDownloadedUpdate();
         return;
       }
-      try {
-        if (thisWindow.isFullScreen()) {
-          // Hiding a fullscreen window strands a black space; leave
-          // fullscreen first, then hide once the transition lands.
-          thisWindow.once('leave-full-screen', () => { try { thisWindow.hide(); } catch (_) {} });
-          thisWindow.setFullScreen(false);
-        } else {
-          thisWindow.hide();
-        }
-        console.log('[diag][main] close intercepted, window hidden (app + agents stay alive)');
-      } catch (_) {}
+      console.log('[diag][main] red-button close, quitting app');
+      app.quit();
     }
   });
   mainWindow.on('closed', () => {
@@ -1924,7 +1911,34 @@ app.whenReady().then(async () => {
   }
 });
 
+// Cmd+W is the default menu's "File > Close Window". Now that the red button
+// routes a close into app.quit(), an unguarded Cmd+W would tear down the whole
+// app + every running agent on a stray tab-close reflex (the exact 1.2.77
+// self-quit class). preventDefault here also blocks the menu accelerator
+// (electron/electron#19279), and because macOS dispatches that accelerator
+// against whichever webContents is focused, we have to guard the main window AND
+// its webview guests, not just one. mac-only; on Windows Ctrl+W is input.control
+// so this no-ops there and leaves that platform's close-on-last-window intact.
+function swallowCloseWindowShortcut(event, input) {
+  if (
+    input.type === 'keyDown' &&
+    process.platform === 'darwin' &&
+    input.meta && !input.control && !input.alt &&
+    (input.key || '').toLowerCase() === 'w'
+  ) {
+    event.preventDefault();
+  }
+}
+
 app.on('web-contents-created', (_event, contents) => {
+  // Block Cmd+W from closing the main window, whether the window chrome or one of
+  // its embedded webviews has focus. OAuth popups (their own 'window' contents,
+  // created while isCreatingMainWindow is false) are left alone so the user can
+  // still Cmd+W them shut.
+  if (isCreatingMainWindow || contents.getType() === 'webview') {
+    contents.on('before-input-event', swallowCloseWindowShortcut);
+  }
+
   // Override the user-agent on popup BrowserWindows (i.e. anything created
   // via window.open from the renderer, which includes the OAuth popup for
   // subscription connect flows). Electron's default UA includes an
@@ -2199,16 +2213,13 @@ app.on('web-contents-created', (_event, contents) => {
 
 app.on('window-all-closed', () => {
   console.log(`[diag][main] window-all-closed (platform=${process.platform}${process.platform === 'darwin' ? ', staying alive' : ', quitting'})`);
-  // macOS: stay alive like a standard Mac app. We never install a custom
-  // application menu, so Electron's DEFAULT menu ships File > Close Window
-  // (Cmd+W) — and with a single window, quitting here turned "close the
-  // window" into "tear down the backend and every running agent". The 1.2.77
-  // prod self-quits all carried this exact signature (window close with no
-  // preceding before-quit). Keeping the process alive de-fangs the whole
-  // class: the dock icon stays, `activate` below reopens against the warm
-  // backend in ~1s, and the [diag][main] close-cause logging identifies the
-  // closer. Explicit quits (Cmd+Q, dock Quit) are untouched — Electron's
-  // quit pipeline runs will-quit -> killBackend regardless of this handler.
+  // macOS: don't quit just because the window list hit zero. The red button now
+  // routes through app.quit() (which drives will-quit -> killBackend itself) and
+  // Cmd+W is swallowed, so the only window-vanish that ISN'T already a real quit
+  // is an unforeseen teardown (a renderer-level destroy that skipped 'close'). For
+  // that stray case we stay alive as a standard Mac app rather than self-quitting
+  // headless, and `activate` below rebuilds the window on the next dock click. The
+  // 1.2.77 self-quits lived exactly here (window close with no before-quit).
   if (process.platform === 'darwin') {
     // An update install closed the window (native quitAndInstall) and now needs the
     // process to actually die so ShipIt can swap + relaunch; finish the quit instead
@@ -2288,9 +2299,10 @@ app.on('will-quit', () => {
 });
 
 app.on('activate', () => {
-  // Dock-click after close-to-dock: the common case is a HIDDEN (not
-  // destroyed) window — just show it again; renderer, webviews, and agents
-  // never stopped, so this is instant and lossless.
+  // Live window still around (minimized, or hidden by some stray path): surface
+  // it instead of building a new one. The red button quits now, so the usual
+  // dock-click-after-close lands in the destroyed-window fallback below; this
+  // branch is the cheap, lossless path for the cases where a window survived.
   if (mainWindow && !mainWindow.isDestroyed()) {
     try {
       if (mainWindow.isMinimized()) {

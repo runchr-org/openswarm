@@ -75,24 +75,41 @@ const DataPrivacySection: React.FC<{ styles: SettingsStyles }> = ({ styles }) =>
   const cancelSx = { color: c.text.secondary, textTransform: 'none', fontWeight: 500 };
   const actionRowSx = { display: 'flex', justifyContent: 'flex-end', gap: 1 };
 
+  // Match the About-section outlined buttons (Restart tour / Check for Updates).
+  const rowBtnSx = {
+    color: c.text.secondary,
+    borderColor: c.border.medium,
+    textTransform: 'none' as const,
+    fontSize: '0.8rem',
+    whiteSpace: 'nowrap' as const,
+    '&:hover': { color: c.accent.primary, borderColor: c.accent.primary },
+  };
+  const eraseBtnSx = {
+    ...rowBtnSx,
+    color: c.status.error,
+    borderColor: c.status.error,
+    '&:hover': { color: c.status.error, borderColor: c.status.error, bgcolor: c.status.errorBg },
+  };
+  const rowSx = { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 3, py: 2 };
+
   return (
     <Box>
-      <Typography sx={sectionSx}>Data &amp; Privacy</Typography>
+      <Typography sx={{ ...sectionSx, mt: 3 }}>Data &amp; Privacy</Typography>
 
-      <Box sx={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 2, py: 2, borderBottom: `1px solid ${c.border.subtle}` }}>
+      <Box sx={{ ...rowSx, borderBottom: `1px solid ${c.border.subtle}` }}>
         <Box>
           <Typography sx={labelSx}>Reset all settings</Typography>
           <Typography sx={descSx}>Puts your preferences back to defaults. Your apps, chats, skills, and sign-in stay.</Typography>
         </Box>
-        <Button onClick={() => { setErr(null); setResetOpen(true); }} sx={{ flexShrink: 0, color: c.text.primary, textTransform: 'none', fontWeight: 500, fontSize: '0.825rem' }}>Reset…</Button>
+        <Button variant="outlined" size="small" onClick={() => { setErr(null); setResetOpen(true); }} sx={rowBtnSx}>Reset</Button>
       </Box>
 
-      <Box sx={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 2, py: 2 }}>
+      <Box sx={rowSx}>
         <Box>
           <Typography sx={{ ...labelSx, color: c.status.error }}>Erase all content and settings</Typography>
           <Typography sx={descSx}>Removes every chat, app, skill, and setting and restarts OpenSwarm fresh. This can't be undone.</Typography>
         </Box>
-        <Button onClick={() => { setErr(null); setEraseText(''); setEraseOpen(true); }} sx={{ flexShrink: 0, color: c.status.error, textTransform: 'none', fontWeight: 500, fontSize: '0.825rem' }}>Erase…</Button>
+        <Button variant="outlined" size="small" onClick={() => { setErr(null); setEraseText(''); setEraseOpen(true); }} sx={eraseBtnSx}>Erase</Button>
       </Box>
 
       <Dialog open={resetOpen} onClose={closeAll} PaperProps={{ sx: dialogPaperSx }}>

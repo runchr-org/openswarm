@@ -103,3 +103,56 @@ def test_injection_no_folder_note_for_flat_skill(skills_dir):
     block = _resolve_attached_skills([{"id": "plain", "name": "Plain", "content": "plain content"}])
     assert "[Using skill: Plain]" in block
     assert "supporting files" not in block.lower()
+
+
+# ---------------------------------------------------------------------------
+# .swarm round-trip for folder skills (export carries files, import rebuilds them).
+# ---------------------------------------------------------------------------
+
+def test_swarm_export_folder_skill_carries_supporting_files(skills_dir):
+    from backend.apps.swarm.entities.skills import SkillExportable
+    base = skills_dir / "vid"
+    _write(str(base / "SKILL.md"), "render")
+    _write(str(base / "scripts" / "go.py"), "print(1)")
+    exp = SkillExportable.load("vid")
+    assert exp is not None
+    files = exp.files()
+    assert "scripts/go.py" in files
+    assert files["scripts/go.py"] == b"print(1)"
+    assert exp._payload["content"] == "render"
+
+
+def test_swarm_import_writes_folder_when_files_present(skills_dir):
+    from backend.apps.swarm.entities.skills import SkillExportable
+    payload = {"slug": "vid", "name": "Vid", "description": "d", "command": "vid", "content": "render"}
+    new_id = SkillExportable.import_(payload, {"scripts/go.py": b"print(1)"}, None)
+    assert os.path.isfile(skills_dir / new_id / "SKILL.md")
+    assert os.path.isfile(skills_dir / new_id / "scripts" / "go.py")
+    synced = {s.id: s for s in skills_mod._sync_skills()}
+    assert synced[new_id].has_supporting_files is True
+
+
+def test_swarm_import_flat_when_no_files(skills_dir):
+    from backend.apps.swarm.entities.skills import SkillExportable
+    payload = {"slug": "note", "name": "Note", "content": "just text"}
+    new_id = SkillExportable.import_(payload, {}, None)
+    assert os.path.isfile(skills_dir / f"{new_id}.md")
+    assert not (skills_dir / new_id).is_dir()
+
+
+def test_stage_zip_carries_supporting_files_into_sandbox():
+    import io as _io, zipfile, os as _os, shutil
+    from backend.apps.swarm.closure import _stage_skill_from_zip
+    buf = _io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as zf:
+        zf.writestr("my-skill/SKILL.md", "do it")
+        zf.writestr("my-skill/scripts/run.sh", "echo hi")
+    sandbox, manifest, warnings = _stage_skill_from_zip(buf.getvalue(), "my-skill.zip", [])
+    try:
+        bid = manifest.entities[0].bundle_id
+        files_dir = _os.path.join(sandbox, "entities", bid, "files")
+        assert _os.path.isfile(_os.path.join(files_dir, "scripts", "run.sh"))
+        # SKILL.md is the payload body, not a supporting file.
+        assert not _os.path.exists(_os.path.join(files_dir, "SKILL.md"))
+    finally:
+        shutil.rmtree(sandbox, ignore_errors=True)

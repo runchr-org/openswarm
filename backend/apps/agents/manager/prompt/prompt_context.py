@@ -262,6 +262,28 @@ def _build_selected_app_context(selected_app_output_ids: list[str] | None) -> st
     )
 
 
+def _build_selected_settings_context(selected_setting_ids: list[str] | None) -> str | None:
+    """Context block when the user points the agent at specific Settings rows.
+
+    A targeting aid, NOT a gate: the settings tools (SettingsRead/SettingsWrite)
+    are always available regardless. This just focuses the agent on the exact
+    fields the user clicked. Ids are AppSettings field names (e.g. 'theme',
+    'default_model'), so no label map to drift out of date."""
+    ids = [s for s in (selected_setting_ids or []) if s]
+    if not ids:
+        return None
+    bullets = "\n".join(f"- {fid}" for fid in ids)
+    return (
+        "<selected_settings>\n"
+        "The user pointed you at these specific OpenSwarm Settings fields. Focus "
+        "on them: call SettingsRead to see their current values, then "
+        "SettingsWrite to change what the user asked for. Leave unrelated "
+        "settings alone.\n"
+        f"{bullets}\n"
+        "</selected_settings>"
+    )
+
+
 def _build_mcp_registry_summary(allowed_tools: list[str], active_mcps: list[str], get_all_tool_names: Callable[[], list[str]]) -> str | None:
     """Compact registry of installed MCP servers, one line per server.
 

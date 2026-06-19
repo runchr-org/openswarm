@@ -63,6 +63,7 @@ from backend.apps.agents.manager.session.history_compaction import (
 from backend.apps.agents.manager.prompt.prompt_context import (
     _build_browser_context,
     _build_selected_app_context,
+    _build_selected_settings_context,
     _build_connected_tools_context,
     _build_mcp_registry_summary,
     _compose_system_prompt,
@@ -454,7 +455,7 @@ class AgentManager:
     def _resolve_context_paths(self, context_paths: list | None) -> str:
         return _resolve_context_paths(context_paths)
 
-    async def _run_agent_loop(self, session_id: str, prompt: str, images: list | None = None, context_paths: list | None = None, forced_tools: list[str] | None = None, attached_skills: list | None = None, fork_session: bool = False, selected_browser_ids: list[str] | None = None, selected_app_output_ids: list[str] | None = None):
+    async def _run_agent_loop(self, session_id: str, prompt: str, images: list | None = None, context_paths: list | None = None, forced_tools: list[str] | None = None, attached_skills: list | None = None, fork_session: bool = False, selected_browser_ids: list[str] | None = None, selected_app_output_ids: list[str] | None = None, selected_setting_ids: list[str] | None = None):
         """Run the Claude Agent SDK query loop for a session."""
         session = self.sessions.get(session_id)
         if not session:
@@ -1280,6 +1281,12 @@ class AgentManager:
             app_ctx = self._build_selected_app_context(selected_app_output_ids)
             if app_ctx:
                 composed_prompt = f"{composed_prompt}\n\n{app_ctx}" if composed_prompt else app_ctx
+
+            # The user can point the agent at specific Settings rows. Targeting
+            # aid only; the settings tools are always on regardless.
+            settings_ctx = _build_selected_settings_context(selected_setting_ids)
+            if settings_ctx:
+                composed_prompt = f"{composed_prompt}\n\n{settings_ctx}" if composed_prompt else settings_ctx
 
             # Per-turn estimate of framework overhead (subtracted from displayed
             # input). Conservative on purpose so honest over-shows beat lies.
@@ -3619,6 +3626,7 @@ class AgentManager:
         hidden: bool = False,
         selected_browser_ids: list[str] | None = None,
         selected_app_output_ids: list[str] | None = None,
+        selected_setting_ids: list[str] | None = None,
         client_message_id: str | None = None,
     ):
         """Send a follow-up message to an existing session."""
@@ -3746,7 +3754,7 @@ class AgentManager:
         if fast_verdict != "no":
             task = asyncio.create_task(self._run_browser_fast_path(session_id, prompt, selected_browser_ids, fast_brief, fast_verdict))
         else:
-            task = asyncio.create_task(self._run_agent_loop(session_id, prompt, images=images, context_paths=context_paths, forced_tools=forced_tools, attached_skills=attached_skills, selected_browser_ids=selected_browser_ids, selected_app_output_ids=selected_app_output_ids))
+            task = asyncio.create_task(self._run_agent_loop(session_id, prompt, images=images, context_paths=context_paths, forced_tools=forced_tools, attached_skills=attached_skills, selected_browser_ids=selected_browser_ids, selected_app_output_ids=selected_app_output_ids, selected_setting_ids=selected_setting_ids))
         self.tasks[session_id] = task
 
     async def _run_browser_fast_path(self, session_id: str, prompt: str, selected_browser_ids: list[str] | None, brief: str = "", verdict: str = "act"):

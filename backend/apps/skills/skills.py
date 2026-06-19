@@ -354,6 +354,14 @@ def write_folder_skill(skill_id: str, files: dict[str, str], meta: dict) -> Skil
     slug = _safe_slug(skill_id)
     base = os.path.join(SKILLS_DIR, slug)
     base_abs = os.path.abspath(base)
+    # A folder write supersedes any legacy flat <slug>.md, so we never leave a
+    # phantom flat file shadowed by the folder (folder wins in _skill_md_path).
+    legacy_flat = os.path.join(SKILLS_DIR, f"{slug}.md")
+    if os.path.isfile(legacy_flat):
+        try:
+            os.remove(legacy_flat)
+        except OSError:
+            pass
     os.makedirs(base, exist_ok=True)
     for rel, content in files.items():
         dest = os.path.abspath(os.path.join(base, rel))
@@ -382,29 +390,13 @@ def write_folder_skill(skill_id: str, files: dict[str, str], meta: dict) -> Skil
 
 @skills.router.post("/create")
 async def create_skill(body: SkillCreate):
-    slug = body.name.lower().replace(" ", "-")
-    fpath = os.path.join(SKILLS_DIR, f"{slug}.md")
-
-    with open(fpath, "w") as f:
-        f.write(body.content)
-
-    index = _load_index()
-    index[slug] = {
-        "name": body.name,
-        "description": body.description,
-        "command": body.command or slug,
-    }
-    _save_index(index)
-
-    skill = Skill(
-        id=slug,
-        name=body.name,
-        description=body.description,
-        content=body.content,
-        file_path=fpath,
-        command=body.command or slug,
-    )
-    pass
+    # All user skills are folders now (<id>/SKILL.md); flat files stay readable
+    # but are no longer written, so a skill's on-disk shape no longer depends on
+    # how it was created vs imported.
+    meta = {"name": body.name, "description": body.description}
+    if body.command:
+        meta["command"] = body.command
+    skill = write_folder_skill(body.name, {"SKILL.md": body.content}, meta)
     return {"ok": True, "skill": skill.model_dump()}
 
 

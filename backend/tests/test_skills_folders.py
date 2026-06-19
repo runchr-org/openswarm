@@ -156,12 +156,30 @@ def test_swarm_import_writes_folder_when_files_present(skills_dir):
     assert synced[new_id].has_supporting_files is True
 
 
-def test_swarm_import_flat_when_no_files(skills_dir):
+def test_swarm_import_always_writes_folder(skills_dir):
+    # Unified storage: even a one-file skill imports as a folder, so a skill's
+    # on-disk shape never depends on whether it had supporting files.
     from backend.apps.swarm.entities.skills import SkillExportable
     payload = {"slug": "note", "name": "Note", "content": "just text"}
     new_id = SkillExportable.import_(payload, {}, None)
-    assert os.path.isfile(skills_dir / f"{new_id}.md")
-    assert not (skills_dir / new_id).is_dir()
+    assert os.path.isfile(skills_dir / new_id / "SKILL.md")
+    assert not (skills_dir / f"{new_id}.md").exists()
+
+
+@pytest.mark.asyncio
+async def test_create_writes_folder_and_supersedes_legacy_flat(skills_dir):
+    from backend.apps.skills.models import SkillCreate
+    # A pre-existing legacy flat skill of the same id...
+    _write(str(skills_dir / "notes.md"), "old flat")
+    # ...is superseded (not shadowed) when the user (re)creates it; folder wins,
+    # and the phantom flat file is removed so there's exactly one shape on disk.
+    res = await skills_mod.create_skill(SkillCreate(name="Notes", content="new body", description="d"))
+    sid = res["skill"]["id"]
+    assert sid == "notes"
+    assert os.path.isfile(skills_dir / "notes" / "SKILL.md")
+    assert not (skills_dir / "notes.md").exists()
+    only = [s for s in skills_mod._sync_skills() if s.id == "notes"]
+    assert len(only) == 1 and only[0].content == "new body"
 
 
 def test_stage_zip_carries_supporting_files_into_sandbox():

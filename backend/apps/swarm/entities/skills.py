@@ -73,24 +73,14 @@ class SkillExportable:
             "description": payload.get("description", ""),
             "command": payload.get("command", slug),
         }
-        # A folder skill arrives with supporting files; write the whole folder.
-        # A bare .md skill writes a single file as before. write_folder_skill is
+        # Every imported skill lands as a folder (SKILL.md + any supporting files),
+        # one path for one-file and multi-file skills alike. write_folder_skill is
         # path-traversal-safe, so an untrusted bundle can't escape the skill dir.
-        if files:
-            bundle = {"SKILL.md": payload.get("content", "")}
-            for rel, data in files.items():
-                bundle[rel] = data.decode("utf-8", errors="replace")
-            skill = store.write_folder_skill(slug, bundle, meta)
-            return skill.id
-        os.makedirs(store.SKILLS_DIR, exist_ok=True)
-        fpath = os.path.join(store.SKILLS_DIR, f"{slug}.md")
-        with open(fpath, "w", encoding="utf-8") as f:
-            f.write(payload.get("content", ""))
-        index = store._load_index()
-        # Imported skills are never builtin, even if the source tagged them so.
-        index[slug] = meta
-        store._save_index(index)
-        return slug
+        bundle = {"SKILL.md": payload.get("content", "")}
+        for rel, data in files.items():
+            bundle[rel] = data.decode("utf-8", errors="replace")
+        skill = store.write_folder_skill(slug, bundle, meta)
+        return skill.id
 
     @classmethod
     def rollback(cls, local_id: str) -> None:

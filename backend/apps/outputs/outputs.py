@@ -12,8 +12,14 @@ from backend.config.Apps import SubApp
 from backend.apps.outputs.models import (
     Output, OutputCreate, OutputUpdate, OutputExecute, OutputExecuteResult,
     VibeCodeRequest, WorkspaceSeedRequest,
+    PublishPreflightRequest, PublishRequest, PublishPreflightResponse,
+    PublishResult, PublishReview,
 )
 from backend.apps.outputs.executor import execute_backend_code, get_code_warnings
+from backend.apps.outputs.publish import (
+    scan_for_publish, quick_ast_gate, build_static, collect_bundle,
+    upload_to_cloud, unpublish_from_cloud, slugify, PublishError,
+)
 from backend.apps.outputs.view_builder_templates import (
     VIEW_TEMPLATE_FILES,
     load_app_builder_skill,
@@ -732,5 +738,82 @@ async def execute_output(body: OutputExecute):
         warnings=warnings_out if warnings_out else None,
         code_preview=code_preview,
     ).model_dump()
+
+
+# ---------------------------------------------------------------------------
+# Publishing to {slug}.openswarm.dev
+# ---------------------------------------------------------------------------
+
+@outputs.router.post("/publish/preflight")
+async def publish_preflight(body: PublishPreflightRequest):
+    """Scan the app (AST + an aux-LLM pass on the user's own creds) and return a
+    review. No build, no cloud call; this just drives the security modal."""
+    output = _load(body.output_id)
+    review = await scan_for_publish(output, load_settings())
+    return PublishPreflightResponse(review=review).model_dump()
+
+
+@outputs.router.post("/publish")
+async def publish_output(body: PublishRequest):
+    """Build (webapp) + bundle + upload to the cloud host. `force` skips the
+    cheap AST safety net (the user already saw the findings in the review modal)."""
+    output = _load(body.output_id)
+    settings = load_settings()
+    if not body.force:
+        ast = quick_ast_gate(output)
+        if ast:
+            return PublishResult(
+                ok=False,
+                blocked=True,
+                review=PublishReview(verdict="warn", findings=ast),
+            ).model_dump()
+
+    output.publish_status = "publishing"
+    output.publish_error = None
+    _save(output)
+    try:
+        dist = await build_static(output)
+        bundle = collect_bundle(output, dist)
+        slug_hint = slugify(body.slug or output.name)
+        res = await upload_to_cloud(settings, name=output.name, slug_hint=slug_hint, bundle=bundle)
+    except PublishError as e:
+        output.publish_status = "error"
+        output.publish_error = str(e)
+        _save(output)
+        return PublishResult(ok=False, error=str(e)).model_dump()
+    except Exception as e:
+        logger.exception("publish failed for %s", output.id)
+        output.publish_status = "error"
+        output.publish_error = "Something went wrong while publishing."
+        _save(output)
+        return PublishResult(ok=False, error=output.publish_error).model_dump()
+
+    output.published_slug = res.get("slug")
+    output.published_url = res.get("url")
+    output.publish_status = "published"
+    output.publish_error = None
+    _save(output)
+    return PublishResult(
+        ok=True,
+        published_slug=output.published_slug,
+        published_url=output.published_url,
+    ).model_dump()
+
+
+@outputs.router.post("/unpublish")
+async def unpublish_output(body: PublishPreflightRequest):
+    """Take the app offline and clear its publish state."""
+    output = _load(body.output_id)
+    if output.published_slug:
+        try:
+            await unpublish_from_cloud(load_settings(), output.published_slug)
+        except PublishError as e:
+            return {"ok": False, "error": str(e)}
+    output.published_slug = None
+    output.published_url = None
+    output.publish_status = None
+    output.publish_error = None
+    _save(output)
+    return {"ok": True}
 
 

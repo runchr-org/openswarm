@@ -18,7 +18,7 @@ def _page(title: str, message: str, status_note: str = "") -> str:
         "<meta name='viewport' content='width=device-width,initial-scale=1'>"
         f"<title>{title}</title></head>"
         f"<body style=\"{_STYLE}\"><div style='max-width:420px'>"
-        f"<div style='font-size:40px;margin-bottom:12px'>🐝</div>"
+        f"<div style='font-size:40px;margin-bottom:12px'>🐙</div>"
         f"<h1 style='font-size:20px;font-weight:650;margin:0 0 8px'>{title}</h1>"
         f"<p style='color:#615d57;font-size:15px;line-height:1.5;margin:0'>{message}</p>"
         f"{note}"

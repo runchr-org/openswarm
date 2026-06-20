@@ -7,8 +7,11 @@ from __future__ import annotations
 import time
 
 # Hard ceiling on tracked keys so a flood of unique IPs can't grow the map without
-# bound; past it we drop the whole window (everyone gets a fresh allowance).
+# bound. Past it we evict the oldest-inserted keys in a batch, never the whole map:
+# a dropped key just gets a fresh allowance, so the worst case is being briefly
+# lenient to a few stale IPs, not wiping every live visitor's count at once.
 _MAX_KEYS = 50_000
+_EVICT_BATCH = _MAX_KEYS // 10
 
 
 class RateLimiter:
@@ -20,7 +23,8 @@ class RateLimiter:
     def allow(self, key: str) -> bool:
         now = time.time()
         if len(self._hits) > _MAX_KEYS:
-            self._hits.clear()
+            for stale in list(self._hits)[:_EVICT_BATCH]:
+                self._hits.pop(stale, None)
         bucket = self._hits.get(key)
         if bucket is None:
             bucket = []

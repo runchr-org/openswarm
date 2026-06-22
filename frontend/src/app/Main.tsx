@@ -252,6 +252,26 @@ const SettingsLoader: React.FC<{ children: React.ReactNode }> = ({ children }) =
     return () => window.removeEventListener('focus', onFocus);
   }, [dispatch]);
 
+  // 9Router starts in the BACKGROUND now, so the boot fetches above can land while
+  // it's still coming up: /models omits subscription models and /subscriptions/status
+  // reports nothing connected, leaving the picker empty and a real sub looking
+  // disconnected. The only other re-sync is window 'focus', which never fires on a
+  // window that's already focused at launch, so it used to stay broken until a manual
+  // Cmd+Shift+R. Re-pull models + status until 9Router answers (running), capped so a
+  // machine where it never comes up doesn't poll forever.
+  const nineRouterUp = useAppSelector((s) => s.subscriptions.status?.running === true);
+  useEffect(() => {
+    if (nineRouterUp) return;
+    let ticks = 0;
+    const id = window.setInterval(() => {
+      ticks += 1;
+      dispatch(fetchSubscriptionStatus());
+      dispatch(fetchModels());
+      if (ticks >= 20) window.clearInterval(id);
+    }, 1500);
+    return () => window.clearInterval(id);
+  }, [nineRouterUp, dispatch]);
+
   useEffect(() => {
     if (loaded) setThemeMode(theme as 'light' | 'dark');
   }, [loaded, theme, setThemeMode]);
@@ -306,12 +326,17 @@ const DefaultModelGuard: React.FC<{ children: React.ReactNode }> = ({ children }
   const settingsLoaded = useAppSelector((s) => s.settings.loaded);
   const byProvider = useAppSelector((s) => s.models.byProvider);
   const modelsLoaded = useAppSelector((s) => s.models.loaded);
+  // Until 9Router answers, /models omits subscription models, so the saved default
+  // can look "no longer available" when it's really just not loaded yet. Reconciling
+  // then would clobber a real sub user's default down to a fallback (and persist it).
+  // Only reconcile against the complete list.
+  const nineRouterUp = useAppSelector((s) => s.subscriptions.status?.running === true);
 
   const [warning, setWarning] = useState<{ from: string; to: string; provider: string } | null>(null);
   const pendingRef = useRef(false);
 
   useEffect(() => {
-    if (!settingsLoaded || !modelsLoaded) return;
+    if (!settingsLoaded || !modelsLoaded || !nineRouterUp) return;
     if (pendingRef.current) return;
     if (Object.keys(byProvider).length === 0) return;
 
@@ -329,7 +354,7 @@ const DefaultModelGuard: React.FC<{ children: React.ReactNode }> = ({ children }
         pendingRef.current = false;
       });
     setWarning({ from: fromLabel, to: fallback.label, provider: fallback.provider });
-  }, [settingsLoaded, modelsLoaded, byProvider, settings, dispatch]);
+  }, [settingsLoaded, modelsLoaded, nineRouterUp, byProvider, settings, dispatch]);
 
   return (
     <>

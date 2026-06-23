@@ -57,8 +57,9 @@ from backend.apps.agents.manager.session import lifecycle
 from backend.apps.agents.manager.permissions import path_gate
 from backend.apps.agents.manager import context_budget
 from backend.apps.agents.manager.streaming.state import ThinkingState, TurnState
+from backend.apps.agents.manager.streaming.hook_context import HookContext
 from backend.apps.agents.manager.streaming import thinking as thinking_mod
-from backend.apps.agents.manager.permissions.decision import effective_policy, request_user_approval
+from backend.apps.agents.manager.permissions import gate_hooks
 from backend.apps.agents.manager.session.workspace_git import _detect_git_identity, _ensure_cwd_git_repo
 from backend.apps.agents.manager.prompt.tool_catalog import (
     FULL_TOOLS,
@@ -85,8 +86,6 @@ from backend.apps.agents.manager.prompt.prompt_context import (
     _resolve_attached_skills,
     _resolve_forced_tools,
     _resolve_mode,
-    TOOLSEARCH_LOOP_THRESHOLD,
-    toolsearch_loop_redirect,
 )
 from backend.apps.agents.manager.prompt.attachments import (
     _build_dir_tree,
@@ -378,7 +377,7 @@ class AgentManager:
                 query, ClaudeAgentOptions, AssistantMessage, ResultMessage,
             )
             from claude_agent_sdk.types import (
-                HookMatcher, PermissionResultAllow, PermissionResultDeny,
+                HookMatcher,
                 TextBlock, ToolUseBlock, ThinkingBlock, StreamEvent,
                 SystemMessage,
             )
@@ -406,156 +405,30 @@ class AgentManager:
         # Per-tool DEFAULT policy (overridden by anything the user has set
         # explicitly in builtin_permissions.json). Bash defaults to
         # always_allow like every other builtin, for a frictionless run.
-        # Three guards below STILL force a prompt even on always_allow:
+        # Three guards in path_gate STILL force a prompt even on always_allow:
         # the catastrophic-pattern match (rm -rf and friends), OS-scheduling
         # (cron/launchd persistence), and the sensitive-path gate. So the
         # poisoned-email -> destructive-command case is still caught; what
         # this trades away is the prompt on ordinary shell commands. Users
         # who want a prompt on every command can flip Bash to "ask" in the UI.
-        policy_defaults: Dict[str, str] = {}
+        hook_ctx = HookContext(
+            session=session,
+            session_id=session_id,
+            prompt=prompt,
+            builtin_perms=builtin_perms,
+            policy_defaults={},
+        )
 
         async def can_use_tool(tool_name, input_data, context):
-            sensitive_pattern: str | None = None
-            if tool_name != "AskUserQuestion":
-                policy, sensitive_pattern = path_gate.maybe_override_policy(
-                    effective_policy(tool_name, builtin_perms, policy_defaults), tool_name, input_data
-                )
-                if policy == "always_allow":
-                    return PermissionResultAllow(updated_input=input_data)
-                if policy == "deny":
-                    return PermissionResultDeny(message="Tool denied by permission policy")
-
-            decision = await request_user_approval(session, session_id, tool_name, input_data, builtin_perms, sensitive_pattern=sensitive_pattern)
-            if decision.get("behavior") == "allow":
-                return PermissionResultAllow(
-                    updated_input=decision.get("updated_input", input_data)
-                )
-            return PermissionResultDeny(
-                message=decision.get("message", "User denied this action")
-            )
-
-        tool_start_times: dict[str, float] = {}
-        # Counts ToolSearch calls in a row (no other tool between them). A run
-        # of these with empty results is the "looping on ToolSearch" wedge.
-        _ts_loop = {"n": 0}
-        # One mid-run connect offer per session: a stuck agent fires the loop-breaker repeatedly,
-        # but the user should see the "connect this MCP" card once, not on every retry.
-        _mcp_offer_sent = {"done": False}
+            return await gate_hooks.can_use_tool(hook_ctx, tool_name, input_data, context)
 
         async def pre_tool_hook(input_data, tool_use_id, context):
-            tool_name = input_data.get("tool_name", "")
-            hook_event = input_data.get("hook_event_name", "PreToolUse")
-
-            # ToolSearch loop-breaker. Gated MCP servers are withheld from the
-            # SDK until MCPActivate, so the CLI's native ToolSearch can never
-            # find them; small models thrash (empty ToolSearch, retry) for
-            # minutes until the user pauses. Let the first couple through, then
-            # redirect to the gate. Any non-ToolSearch call is real progress, so
-            # the counter resets. Gated-server lookup is deferred behind the
-            # threshold so the common (non-looping) path stays free.
-            if tool_name == "ToolSearch":
-                _ts_loop["n"] += 1
-                if _ts_loop["n"] >= TOOLSEARCH_LOOP_THRESHOLD:
-                    _gated = gated_mcp_server_names(session.allowed_tools, session.active_mcps)
-                    _reason = toolsearch_loop_redirect(_ts_loop["n"], _gated)
-                    if _reason:
-                        logger.info(f"[MCP-DEBUG] ToolSearch loop-breaker fired for {session_id} (n={_ts_loop['n']})")
-                        # 2B-MCP: also surface a one-click connect offer to the USER for the vetted
-                        # gated servers the agent keeps reaching for. Suggest-only: this just shows a
-                        # card on the same channel the preflight uses; activation still requires
-                        # MCPActivate + the dispatch gate, so it opens no side channel. Once per run,
-                        # fail-open (an offer hiccup must never block the agent).
-                        if not _mcp_offer_sent["done"]:
-                            try:
-                                from backend.apps.agents.core.mcp_preflight import offer_for_gated_server
-                                _s = load_settings()
-                                _offers = [o for o in (offer_for_gated_server(n, _s) for n in _gated) if o]
-                                if _offers:
-                                    _mcp_offer_sent["done"] = True
-                                    await ws_manager.send_to_session(session_id, "agent:mcp_suggestions", {
-                                        "session_id": session_id,
-                                        "suggestions": _offers,
-                                        "is_vague": False,
-                                    })
-                            except Exception:
-                                logger.debug("mid-run MCP connect offer skipped", exc_info=True)
-                        return {
-                            "hookSpecificOutput": {
-                                "hookEventName": hook_event,
-                                "permissionDecision": "deny",
-                                "permissionDecisionReason": _reason,
-                            }
-                        }
-            else:
-                _ts_loop["n"] = 0
-
-            # MCPSearch is the agent saying "I need an integration I don't have" (e.g. "no email
-            # connected"). Don't make the user read a wall of options: fire the same curated connect
-            # card the launch preflight uses, keyed to their original request. Non-blocking (the search
-            # proceeds) and once per run; covers the common path the ToolSearch-loop branch misses
-            # because a capable model does one MCPSearch instead of thrashing. Suggest-only as ever.
-            if (tool_name.endswith("MCPSearch") or tool_name.endswith("MCPList")) and not _mcp_offer_sent["done"]:
-                _mcp_offer_sent["done"] = True
-
-                async def _offer_from_prompt():
-                    try:
-                        from backend.apps.agents.core.mcp_preflight import run_preflight
-                        result = await run_preflight(prompt, task_id=session_id, require_vague=False)
-                        offers = result.get("suggestions", [])
-                        if offers:
-                            await ws_manager.send_to_session(session_id, "agent:mcp_suggestions", {
-                                "session_id": session_id,
-                                "suggestions": offers,
-                                "is_vague": False,
-                            })
-                    except Exception:
-                        logger.debug("MCPSearch-triggered connect offer skipped", exc_info=True)
-
-                asyncio.create_task(_offer_from_prompt())
-
-            if tool_name and tool_name != "AskUserQuestion":
-                tool_input = input_data.get("tool_input", {})
-                policy, sensitive_pattern = path_gate.maybe_override_policy(
-                    effective_policy(tool_name, builtin_perms, policy_defaults), tool_name, tool_input
-                )
-
-                if policy == "deny":
-                    return {
-                        "hookSpecificOutput": {
-                            "hookEventName": hook_event,
-                            "permissionDecision": "deny",
-                            "permissionDecisionReason": "Tool denied by permission policy",
-                        }
-                    }
-
-                if policy == "ask":
-                    decision = await request_user_approval(session, session_id, tool_name, tool_input, builtin_perms, sensitive_pattern=sensitive_pattern)
-
-                    if decision.get("behavior") == "allow":
-                        if tool_use_id:
-                            tool_start_times[tool_use_id] = time.time()
-                        return {
-                            "hookSpecificOutput": {
-                                "hookEventName": hook_event,
-                                "permissionDecision": "allow",
-                            }
-                        }
-                    return {
-                        "hookSpecificOutput": {
-                            "hookEventName": hook_event,
-                            "permissionDecision": "deny",
-                            "permissionDecisionReason": decision.get("message", "User denied this action"),
-                        }
-                    }
-
-            if tool_use_id:
-                tool_start_times[tool_use_id] = time.time()
-            return {}
+            return await gate_hooks.pre_tool_hook(hook_ctx, input_data, tool_use_id, context)
 
         async def post_tool_hook(input_data, tool_use_id, context):
             elapsed_ms = None
-            if tool_use_id and tool_use_id in tool_start_times:
-                elapsed_ms = int((time.time() - tool_start_times.pop(tool_use_id)) * 1000)
+            if tool_use_id and tool_use_id in hook_ctx.tool_start_times:
+                elapsed_ms = int((time.time() - hook_ctx.tool_start_times.pop(tool_use_id)) * 1000)
 
             raw_response = input_data.get("tool_response", "")
 

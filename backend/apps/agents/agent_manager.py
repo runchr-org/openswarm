@@ -53,6 +53,7 @@ from backend.apps.agents.manager import metadata
 from backend.apps.agents.manager.session.apply_context_window import apply_context_window
 from backend.apps.agents.manager.session import lifecycle
 from backend.apps.agents.manager.permissions import path_gate
+from backend.apps.agents.manager import context_budget
 from backend.apps.agents.manager.session.workspace_git import _detect_git_identity, _ensure_cwd_git_repo
 from backend.apps.agents.manager.prompt.tool_catalog import (
     FULL_TOOLS,
@@ -370,32 +371,7 @@ class AgentManager:
     # ------------------------------------------------------------------
 
     def _maybe_compact(self, session: AgentSession, force: bool = False) -> bool:
-        """Run summarizer when ctx_used_pct >= compact_threshold_pct (or force).
-
-        Returns True if a new summary was produced. Mutates session state:
-        sets compacted_through_msg_id and emits a context_status event.
-        Never modifies session.messages, originals stay around for the
-        UI drawer; only the history *sent to the SDK* is trimmed (handled
-        in _build_history_prefix lookups).
-        """
-        ctx_used = session.tokens.get("input", 0) / max(1, session.context_window)
-        if not force and ctx_used < session.compact_threshold_pct:
-            return False
-        msgs = _get_branch_messages(session)
-        if len(msgs) < 4:
-            return False
-        # Summarize everything up to (but not including) the last 6
-        # messages, that window keeps recent intent visible to the
-        # model so it doesn't lose its train of thought right after
-        # compaction.
-        cutoff = max(0, len(msgs) - 6)
-        if cutoff == 0:
-            return False
-        last_id = msgs[cutoff - 1].id
-        if session.compacted_through_msg_id == last_id and not force:
-            return False
-        session.compacted_through_msg_id = last_id
-        return True
+        return context_budget.maybe_compact(session, force)
 
     async def _emit_context_update(
         self,
@@ -407,24 +383,11 @@ class AgentManager:
         cache_read_tokens: int = 0,
         cache_read_pct: float = 0.0,
     ) -> None:
-        if input_tokens is None:
-            input_tokens = int(session.tokens.get("input", 0) or 0)
-        if output_tokens is None:
-            output_tokens = int(session.tokens.get("output", 0) or 0)
-        session.tokens["input"] = input_tokens
-        session.tokens["output"] = output_tokens
-        ctx_window = max(1, getattr(session, "context_window", 0) or 200_000)
-        await ws_manager.send_to_session(session_id, "agent:context_update", {
-            "session_id": session_id,
-            "input_tokens": input_tokens,
-            "output_tokens": output_tokens,
-            "cache_read_tokens": cache_read_tokens,
-            "cache_read_pct": cache_read_pct,
-            "ctx_used_pct": round(input_tokens / ctx_window, 4) if input_tokens else 0.0,
-            "context_window": ctx_window,
-            "framework_overhead_tokens": session.framework_overhead_tokens,
-            "active_mcps": list(session.active_mcps),
-        })
+        return await context_budget.emit_context_update(
+            session_id, session,
+            input_tokens=input_tokens, output_tokens=output_tokens,
+            cache_read_tokens=cache_read_tokens, cache_read_pct=cache_read_pct,
+        )
 
     def _build_prompt_content(self, prompt: str, images: list | None = None, context_paths: list | None = None, forced_tools: list[str] | None = None, attached_skills: list | None = None, api_type: str = "anthropic", model: str = ""):
         return _build_prompt_content(prompt, images, context_paths, forced_tools, attached_skills, api_type, model)

@@ -57,6 +57,59 @@ def _assistant(blocks, **kw):
     return AssistantMessage(**base)
 
 
+def _capture_env(monkeypatch, settings, api_type, resolved_model, model_entry):
+    """Drive the real loop with a mocked provider resolution; return the env dict the loop built
+    into ClaudeAgentOptions (the provider-route auth config the SDK runs under)."""
+    import backend.apps.agents.providers.registry as reg
+    import backend.apps.agents.agent_manager as am
+    monkeypatch.setattr(am, "load_settings", lambda: settings, raising=True)
+    monkeypatch.setattr(reg, "get_api_type", lambda model: api_type, raising=True)
+    monkeypatch.setattr(reg, "resolve_model_id_for_sdk", lambda model, s: resolved_model, raising=True)
+    monkeypatch.setattr(reg, "_find_builtin_model", lambda model: model_entry, raising=True)
+    captured = {}
+
+    async def capturing_query(*args, **kwargs):
+        captured["options"] = kwargs.get("options")
+        yield _assistant([TextBlock(text="ok")])
+        yield _result()
+
+    async def fake_send(session_id, event, data):
+        pass
+
+    monkeypatch.setattr(ws_mod.ws_manager, "send_to_session", fake_send, raising=True)
+    monkeypatch.setattr(claude_agent_sdk, "query", capturing_query, raising=True)
+    mgr = AgentManager()
+    from backend.apps.agents.core.models import AgentSession
+    session = AgentSession(name="t", model="sonnet", dashboard_id="d")
+    mgr.sessions[session.id] = session
+    asyncio.run(mgr.p_run_agent_loop(session.id, "hi"))
+    return captured["options"].env
+
+
+def test_loop_builds_pro_proxy_env(monkeypatch):
+    # OpenSwarm Pro: the run authenticates against the cloud proxy with the server bearer, never
+    # the user's own key. Pin that the proxy bearer + base url land in the env.
+    from backend.apps.settings.models import AppSettings
+    import backend.apps.settings.credentials as creds
+    monkeypatch.setattr(creds, "proxy_auth", lambda s: ("pro-bearer-xyz", "https://api.openswarm.com/proxy"), raising=True)
+    settings = AppSettings(connection_mode="openswarm-pro")
+    env = _capture_env(monkeypatch, settings, "anthropic", "claude-sonnet-4-6", None)
+    assert env["ANTHROPIC_AUTH_TOKEN"] == "pro-bearer-xyz"
+    assert env["ANTHROPIC_BASE_URL"] == "https://api.openswarm.com/proxy"
+    assert "ANTHROPIC_API_KEY" not in env  # Pro never exposes a raw key
+
+
+def test_loop_builds_direct_openai_key_env(monkeypatch):
+    # Direct OpenAI api-route key: routes through the local openai-passthrough that fixes the
+    # max_tokens->max_completion_tokens rename GPT-5 requires. Pin the key + passthrough base url.
+    from backend.apps.settings.models import AppSettings
+    settings = AppSettings(openai_api_key="sk-openai-test")
+    env = _capture_env(monkeypatch, settings, "openai", "cp-openai/gpt-5",
+                       {"route": "api", "api": "openai"})
+    assert env["OPENAI_API_KEY"] == "sk-openai-test"
+    assert "openai-passthrough" in env["OPENAI_BASE_URL"]
+
+
 def test_loop_builds_direct_anthropic_key_env(monkeypatch):
     # Pin the provider env/route config the loop builds, the part the hook flagged as untested.
     # Drive the REAL loop with a direct-Anthropic-key config (own_key, a non-9router model, no

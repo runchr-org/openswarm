@@ -81,8 +81,8 @@ async def configure_provider_env(
                     "providers need 9Router to translate the Anthropic "
                     "protocol, install Node.js and restart the app."
                 )
-        from backend.apps.agents.providers.registry import _find_custom_provider_for_value as p_find_custom_provider_for_value
-        cp = p_find_custom_provider_for_value(global_settings, session.model)
+        from backend.apps.agents.providers.registry import _find_custom_provider_for_value as find_custom_provider_for_value
+        cp = find_custom_provider_for_value(global_settings, session.model)
         env = {
             "ANTHROPIC_API_KEY": "9router",
             "ANTHROPIC_BASE_URL": "http://localhost:20128",
@@ -96,8 +96,8 @@ async def configure_provider_env(
             # CLI can issue requests. Servers that DO check auth always
             # have a real key configured.
             env["OPENAI_API_KEY"] = (cp.api_key or "").strip() or "no-auth-required"
-            from backend.apps.nine_router import normalize_openai_compat_base_url as p_norm_cp_url
-            env["OPENAI_BASE_URL"] = p_norm_cp_url(cp.base_url or "")
+            from backend.apps.nine_router import normalize_openai_compat_base_url as norm_cp_url
+            env["OPENAI_BASE_URL"] = norm_cp_url(cp.base_url or "")
         # Pin subagent ids, without these, CLI's default Haiku 4.5
         # gets sent to the custom provider and 404s.
         if global_settings.anthropic_api_key:

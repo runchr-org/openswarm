@@ -1,9 +1,13 @@
 import os
+from typing import Dict, List, Optional, Tuple
+
+from typeguard import typechecked
 
 from backend.apps.agents.manager.prompt.prompt_context import resolve_attached_skills, resolve_forced_tools
 
 
-def _build_dir_tree(root: str, max_depth: int = 4, prefix: str = "") -> list[str]:
+@typechecked
+def build_dir_tree(root: str, max_depth: int = 4, prefix: str = "") -> List[str]:
     """Build a recursive directory tree listing."""
     lines = []
     try:
@@ -17,12 +21,13 @@ def _build_dir_tree(root: str, max_depth: int = 4, prefix: str = "") -> list[str
     for d in dirs:
         lines.append(f"{prefix}{d}/")
         if max_depth > 1:
-            sub = _build_dir_tree(os.path.join(root, d), max_depth - 1, prefix + "  ")
+            sub = build_dir_tree(os.path.join(root, d), max_depth - 1, prefix + "  ")
             lines.extend(sub)
     return lines
 
 
-def _build_prompt_content(prompt: str, images: list | None = None, context_paths: list | None = None, forced_tools: list[str] | None = None, attached_skills: list | None = None, api_type: str = "anthropic", model: str = ""):
+@typechecked
+def build_prompt_content(prompt: str, images: Optional[List] = None, context_paths: Optional[List] = None, forced_tools: Optional[List[str]] = None, attached_skills: Optional[List] = None, api_type: str = "anthropic", model: str = ""):
     """Build message content for the Anthropic SDK's prompt stream.
 
     Routes attachments per provider:
@@ -42,7 +47,7 @@ def _build_prompt_content(prompt: str, images: list | None = None, context_paths
         anything binary, since native shape varies wildly. Caller can
         opt-in to the OR file-parser via a separate plugins config.
     """
-    context_text, native_blocks, refusals = _resolve_attachments(
+    context_text, native_blocks, refusals = resolve_attachments(
         context_paths, api_type=api_type, model=model,
     )
     forced_tools_text = resolve_forced_tools(forced_tools)
@@ -55,7 +60,7 @@ def _build_prompt_content(prompt: str, images: list | None = None, context_paths
     has_native = bool(native_blocks)
     if not images and not has_native:
         return full_prompt
-    content: list[dict] = [{"type": "text", "text": full_prompt}]
+    content: List[dict] = [{"type": "text", "text": full_prompt}]
     for img in (images or []):
         content.append({
             "type": "image",
@@ -69,7 +74,8 @@ def _build_prompt_content(prompt: str, images: list | None = None, context_paths
     return content
 
 
-def _resolve_attachments(context_paths: list | None, api_type: str, model: str) -> tuple[str, list[dict], list[str]]:
+@typechecked
+def resolve_attachments(context_paths: Optional[List], api_type: str, model: str) -> Tuple[str, List[dict], List[str]]:
     """Split context_paths into:
        - inline text (returned as the existing <context_file> block string)
        - native content blocks for this provider (PDFs/images)
@@ -92,9 +98,9 @@ def _resolve_attachments(context_paths: list | None, api_type: str, model: str) 
         return "", [], []
     from backend.apps.settings.settings import _sniff_file_kind
     import base64 as _b64
-    sections: list[str] = []
-    native: list[dict] = []
-    refusals: list[str] = []
+    sections: List[str] = []
+    native: List[dict] = []
+    refusals: List[str] = []
 
     # The Claude Agent SDK speaks only Anthropic content-block shape.
     # 9router 0.3.60 translates `image` blocks to the per-provider
@@ -164,7 +170,7 @@ def _resolve_attachments(context_paths: list | None, api_type: str, model: str) 
             sections.append(f"[Context: {path}, not found]")
             continue
         if cp_type == "directory" and os.path.isdir(path):
-            tree_lines = _build_dir_tree(path, max_depth=4)
+            tree_lines = build_dir_tree(path, max_depth=4)
             sections.append(
                 f"<context_directory path=\"{path}\">\n{chr(10).join(tree_lines)}\n</context_directory>"
             )
@@ -299,7 +305,8 @@ def _resolve_attachments(context_paths: list | None, api_type: str, model: str) 
 # Legacy entry point retained for any external caller; routes to the
 # new attachment resolver with anthropic-default routing (no native
 # blocks emitted, so behavior is the safe text-only old path).
-def _resolve_context_paths(context_paths: list | None) -> str:
-    text, _native, refusals = _resolve_attachments(context_paths, api_type="anthropic", model="")
+@typechecked
+def resolve_context_paths(context_paths: Optional[List]) -> str:
+    text, _native, refusals = resolve_attachments(context_paths, api_type="anthropic", model="")
     refusal_text = "\n\n".join(refusals)
     return "\n\n".join(p for p in (text, refusal_text) if p)

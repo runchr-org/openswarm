@@ -20,10 +20,10 @@ from backend.apps.agents.manager.prompt.tool_catalog import (
     is_fully_denied,
 )
 from backend.apps.agents.manager.prompt.attachments import (
-    _build_dir_tree as build_dir_tree,
-    _build_prompt_content as build_prompt_content,
-    _resolve_attachments as resolve_attachments,
-    _resolve_context_paths as resolve_context_paths,
+    build_dir_tree,
+    build_prompt_content,
+    resolve_attachments,
+    resolve_context_paths,
 )
 from backend.apps.tools_lib.tools_lib import (
     _load_all as load_all_tools,

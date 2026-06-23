@@ -1014,7 +1014,7 @@ def test_compact_threshold_default():
 def test_post_compact_estimate_excludes_compacted_messages():
     from backend.apps.agents.core.models import AgentSession, Message
     from backend.apps.agents.manager.session.history_compaction import (
-        _estimate_post_compact_input,
+        estimate_post_compact_input,
     )
 
     messages = [
@@ -1026,7 +1026,7 @@ def test_post_compact_estimate_excludes_compacted_messages():
     s.compacted_through_msg_id = "m5"
     s.framework_overhead_tokens = 100
 
-    assert _estimate_post_compact_input(s) == 100 + 200 + (len("keepkeep") // 4)
+    assert estimate_post_compact_input(s) == 100 + 200 + (len("keepkeep") // 4)
 
 
 @pytest.mark.asyncio

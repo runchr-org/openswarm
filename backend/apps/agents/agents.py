@@ -2,7 +2,7 @@ from backend.config.Apps import SubApp
 from backend.apps.agents.agent_manager import agent_manager
 from backend.apps.agents.core.ws_manager import ws_manager
 from backend.apps.agents.core.models import AgentConfig, ApprovalResponse
-from backend.apps.agents.manager.session.history_compaction import _estimate_post_compact_input
+from backend.apps.agents.manager.session.history_compaction import estimate_post_compact_input
 from contextlib import asynccontextmanager
 from fastapi import WebSocket, WebSocketDisconnect, HTTPException
 from fastapi.responses import JSONResponse
@@ -318,7 +318,7 @@ async def compact_session(session_id: str):
             await agent_manager.p_emit_context_update(
                 session_id,
                 session,
-                input_tokens=_estimate_post_compact_input(session),
+                input_tokens=estimate_post_compact_input(session),
                 output_tokens=session.tokens.get("output", 0),
             )
         except Exception:

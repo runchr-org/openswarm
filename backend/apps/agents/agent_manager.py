@@ -59,9 +59,9 @@ from backend.apps.agents.manager.prompt.tool_catalog import (
     get_all_tool_names,
 )
 from backend.apps.agents.manager.session.history_compaction import (
-    _build_history_prefix as build_history_prefix,
-    _estimate_post_compact_input as estimate_post_compact_input,
-    _get_branch_messages as get_branch_messages,
+    build_history_prefix,
+    estimate_post_compact_input,
+    get_branch_messages,
 )
 from backend.apps.agents.manager.prompt.prompt_context import resolve_mode
 

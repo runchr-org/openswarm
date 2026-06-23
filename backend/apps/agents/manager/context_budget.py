@@ -13,7 +13,7 @@ from typeguard import typechecked
 
 from backend.apps.agents.core.models import AgentSession
 from backend.apps.agents.core.ws_manager import ws_manager
-from backend.apps.agents.manager.session.history_compaction import _get_branch_messages as get_branch_messages
+from backend.apps.agents.manager.session.history_compaction import get_branch_messages
 
 
 @typechecked

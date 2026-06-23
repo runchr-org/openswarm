@@ -1,5 +1,7 @@
 import json
 import logging
+from typing import Dict, List, Optional, Tuple
+from typeguard import typechecked
 import os
 import re
 
@@ -8,7 +10,8 @@ from backend.config.paths import SESSIONS_DIR
 logger = logging.getLogger(__name__)
 
 
-def _get_branch_messages(session) -> list:
+@typechecked
+def get_branch_messages(session) -> List:
     """Return the linear message list for the active branch, walking the branch tree."""
     branch_id = session.active_branch_id or "main"
     branch = session.branches.get(branch_id)
@@ -48,7 +51,8 @@ def _get_branch_messages(session) -> list:
     return result
 
 
-def _build_history_prefix(messages, cutoff_msg_id: str | None = None) -> str:
+@typechecked
+def build_history_prefix(messages, cutoff_msg_id: Optional[str] = None) -> str:
     """Format branch messages into a conversation summary for context injection.
 
     When `cutoff_msg_id` is provided (session.compacted_through_msg_id), drop every
@@ -71,10 +75,11 @@ def _build_history_prefix(messages, cutoff_msg_id: str | None = None) -> str:
     return "<prior_conversation>\n" + "\n".join(lines) + "\n</prior_conversation>"
 
 
-def _estimate_post_compact_input(session) -> int:
+@typechecked
+def estimate_post_compact_input(session) -> int:
     """Return a conservative token estimate after compaction trims history."""
     try:
-        messages = _get_branch_messages(session)
+        messages = get_branch_messages(session)
         cutoff_msg_id = getattr(session, "compacted_through_msg_id", None)
         if cutoff_msg_id:
             skip_idx = next(
@@ -104,7 +109,8 @@ def _estimate_post_compact_input(session) -> int:
         return max(0, int(getattr(session, "framework_overhead_tokens", 0) or 0))
 
 
-def _truncate_large_tool_result(content: object, session_id: str, msg_id: str, max_bytes: int = 50_000) -> tuple[object, str | None]:
+@typechecked
+def truncate_large_tool_result(content: object, session_id: str, msg_id: str, max_bytes: int = 50_000) -> Tuple[object, Optional[str]]:
     """Spill a large tool_result body to disk, return a truncated
     inline replacement plus the on-disk path (or None if untouched).
 

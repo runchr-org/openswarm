@@ -17,7 +17,7 @@ from typeguard import typechecked
 from backend.apps.agents.core.models import AgentSession, Message
 from backend.apps.agents.core.ws_manager import ws_manager
 from backend.apps.agents.manager.session.apply_context_window import apply_context_window
-from backend.apps.agents.manager.session.history_compaction import _truncate_large_tool_result
+from backend.apps.agents.manager.session.history_compaction import truncate_large_tool_result
 from backend.apps.agents.manager.streaming.hook_context import HookContext
 from backend.apps.agents.manager.view_builder_state import view_builder_dirty_sessions
 
@@ -209,7 +209,7 @@ async def post_tool_hook(ctx: HookContext, input_data: dict, tool_use_id, contex
     # at *write* time (before the next turn ships history to the
     # SDK) so the bloat never re-enters context.
     try:
-        truncated_content, blob_path = _truncate_large_tool_result(
+        truncated_content, blob_path = truncate_large_tool_result(
             result_msg.content, session.id, result_msg.id
         )
         if blob_path:

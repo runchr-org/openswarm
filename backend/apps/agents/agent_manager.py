@@ -51,6 +51,7 @@ from backend.apps.agents.manager.session.cloud_sync import _sync_session_close
 from backend.apps.agents.manager import browser_dispatch
 from backend.apps.agents.manager import metadata
 from backend.apps.agents.manager.session.apply_context_window import apply_context_window
+from backend.apps.agents.manager.session import lifecycle
 from backend.apps.agents.manager.session.workspace_git import _detect_git_identity, _ensure_cwd_git_repo
 from backend.apps.agents.manager.prompt.tool_catalog import (
     FULL_TOOLS,
@@ -4131,41 +4132,15 @@ class AgentManager:
         logger.info(f"Session {session_id} permanently deleted")
 
     async def resume_session(self, session_id: str) -> AgentSession:
-        """Restore a closed session from JSON file back into active memory."""
         if session_id in self.sessions:
             return self.sessions[session_id]
-
-        data = _load_session_data(session_id)
-        if data is None:
-            raise ValueError(f"Session {session_id} not found in history")
-
-        session = AgentSession(**data)
-        apply_context_window(session)
-
-        hours_since_closed = 0
-        if data.get("closed_at"):
-            try:
-                closed = datetime.fromisoformat(data["closed_at"][:19])
-                hours_since_closed = round((datetime.now() - closed).total_seconds() / 3600, 1)
-            except Exception:
-                pass
-
-        session.closed_at = None
+        session = lifecycle.load_session_for_resume(session_id)
         self.sessions[session_id] = session
-
-        # Do NOT delete the disk file here. The history list (get_history)
-        # reads from disk; deleting on resume meant every click on a past
-        # chat permanently removed it from history on the next restart.
-        # The disk copy stays as the durable record; subsequent turn
-        # completions and close_session calls overwrite it via
-        # _save_session, so memory and disk stay in sync.
-
         await ws_manager.send_to_session(session_id, "agent:status", {
             "session_id": session_id,
             "status": session.status,
             "session": session.model_dump(mode="json"),
         })
-
         logger.info(f"Session {session_id} resumed from history")
         return session
 
@@ -4270,80 +4245,13 @@ class AgentManager:
             logger.info(f"Restored session {session.id}")
 
     async def duplicate_session(self, session_id: str, dashboard_id: str | None = None, up_to_message_id: str | None = None) -> AgentSession:
-        """Create an independent copy of a session with the same chat history."""
-        source = self.sessions.get(session_id)
-        if not source:
-            data = _load_session_data(session_id)
-            if data is None:
-                raise ValueError(f"Session {session_id} not found")
-            source = AgentSession(**data)
-            apply_context_window(source)
-
-        source_messages = list(source.messages)
-        if up_to_message_id:
-            cut_idx = next(
-                (i for i, m in enumerate(source_messages) if m.id == up_to_message_id),
-                None,
-            )
-            if cut_idx is not None:
-                source_messages = source_messages[: cut_idx + 1]
-
-        old_to_new_msg: dict[str, str] = {}
-        new_messages: list[Message] = []
-        for msg in source_messages:
-            new_id = uuid4().hex
-            old_to_new_msg[msg.id] = new_id
-            new_messages.append(Message(
-                id=new_id,
-                role=msg.role,
-                content=msg.content,
-                timestamp=msg.timestamp,
-                branch_id=msg.branch_id,
-                parent_id=old_to_new_msg.get(msg.parent_id) if msg.parent_id else None,
-                context_paths=msg.context_paths,
-                attached_skills=msg.attached_skills,
-                forced_tools=msg.forced_tools,
-                images=msg.images,
-            ))
-
-        new_branches: dict[str, MessageBranch] = {}
-        for bid, branch in source.branches.items():
-            new_branches[bid] = MessageBranch(
-                id=bid,
-                parent_branch_id=branch.parent_branch_id,
-                fork_point_message_id=old_to_new_msg.get(branch.fork_point_message_id) if branch.fork_point_message_id else None,
-                created_at=branch.created_at,
-            )
-
-        new_session = AgentSession(
-            id=uuid4().hex,
-            name=f"{source.name} (copy)",
-            status="stopped",
-            model=source.model,
-            mode=source.mode,
-            system_prompt=source.system_prompt,
-            allowed_tools=list(source.allowed_tools),
-            max_turns=source.max_turns,
-            cwd=source.cwd,
-            created_at=datetime.now(),
-            messages=new_messages,
-            branches=new_branches,
-            active_branch_id=source.active_branch_id,
-            tool_group_meta=dict(source.tool_group_meta),
-            dashboard_id=dashboard_id or source.dashboard_id,
-            sdk_session_id=source.sdk_session_id,
-            needs_fork=True,
-        )
-        apply_context_window(new_session)
-
+        new_session = lifecycle.build_duplicate_session(self.sessions.get(session_id), session_id, dashboard_id, up_to_message_id)
         self.sessions[new_session.id] = new_session
-
         await ws_manager.send_to_session(new_session.id, "agent:status", {
             "session_id": new_session.id,
             "status": new_session.status,
             "session": new_session.model_dump(mode="json"),
         })
-
         return new_session
 
     async def invoke_agent(

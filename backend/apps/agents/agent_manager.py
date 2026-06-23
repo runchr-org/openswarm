@@ -60,6 +60,11 @@ from backend.apps.agents.manager.streaming.state import ThinkingState, TurnState
 from backend.apps.agents.manager.streaming.hook_context import HookContext
 from backend.apps.agents.manager.streaming import thinking as thinking_mod
 from backend.apps.agents.manager.permissions import gate_hooks
+from backend.apps.agents.manager.view_builder_state import (
+    VIEW_BUILDER_RENDER_MAX_RETRIES,
+    view_builder_render_retry_counts,
+    view_builder_dirty_sessions,
+)
 from backend.apps.agents.manager.session.workspace_git import _detect_git_identity, _ensure_cwd_git_repo
 from backend.apps.agents.manager.prompt.tool_catalog import (
     FULL_TOOLS,
@@ -97,11 +102,6 @@ from backend.apps.agents.manager.prompt.attachments import (
 logger = logging.getLogger(__name__)
 
 os.environ.setdefault("CLAUDE_CODE_STREAM_CLOSE_TIMEOUT", "3600000")
-
-
-p_VIEW_BUILDER_RENDER_MAX_RETRIES = 2
-p_view_builder_render_retry_counts: dict[str, int] = {}
-p_view_builder_dirty_sessions: set[str] = set()
 
 
 class AgentManager:
@@ -508,7 +508,7 @@ class AgentManager:
                 ))
 
             if session.mode == "view-builder" and (wrote_frontend_file or installed_pkg):
-                p_view_builder_dirty_sessions.add(session.id)
+                view_builder_dirty_sessions.add(session.id)
                 try:
                     from backend.apps.outputs.runtime import (
                         manager as outputs_runtime_manager,
@@ -1107,7 +1107,7 @@ class AgentManager:
                 MAX_RETRIES then lets the stop through."""
                 if session.mode != "view-builder":
                     return {}
-                if session.id not in p_view_builder_dirty_sessions:
+                if session.id not in view_builder_dirty_sessions:
                     return {}
                 from backend.apps.outputs.runtime import (
                     manager as outputs_runtime_manager,
@@ -1122,31 +1122,31 @@ class AgentManager:
                     state, error_text = outputs_runtime_manager.get_render_state_for_workspace(session.id)
 
                 if state != "error":
-                    p_view_builder_render_retry_counts.pop(session.id, None)
-                    p_view_builder_dirty_sessions.discard(session.id)
+                    view_builder_render_retry_counts.pop(session.id, None)
+                    view_builder_dirty_sessions.discard(session.id)
                     return {}
 
-                attempts = p_view_builder_render_retry_counts.get(session.id, 0)
-                if attempts >= p_VIEW_BUILDER_RENDER_MAX_RETRIES:
+                attempts = view_builder_render_retry_counts.get(session.id, 0)
+                if attempts >= VIEW_BUILDER_RENDER_MAX_RETRIES:
                     logger.warning(
                         "view-builder preview still failing after %s attempts for session %s; allowing stop",
                         attempts, session.id,
                     )
-                    p_view_builder_render_retry_counts.pop(session.id, None)
-                    p_view_builder_dirty_sessions.discard(session.id)
+                    view_builder_render_retry_counts.pop(session.id, None)
+                    view_builder_dirty_sessions.discard(session.id)
                     return {}
 
-                p_view_builder_render_retry_counts[session.id] = attempts + 1
+                view_builder_render_retry_counts[session.id] = attempts + 1
                 logger.info(
                     "view-builder render block (attempt %s/%s) for session %s",
-                    attempts + 1, p_VIEW_BUILDER_RENDER_MAX_RETRIES, session.id,
+                    attempts + 1, VIEW_BUILDER_RENDER_MAX_RETRIES, session.id,
                 )
                 trimmed = error_text[-3000:] if len(error_text) > 3000 else error_text
                 return {
                     "decision": "block",
                     "reason": (
                         f"The preview failed to render (attempt {attempts + 1}/"
-                        f"{p_VIEW_BUILDER_RENDER_MAX_RETRIES}):\n\n"
+                        f"{VIEW_BUILDER_RENDER_MAX_RETRIES}):\n\n"
                         f"{trimmed}\n\n"
                         "Fix this so the app renders before finishing; the user "
                         "currently sees an error instead of the app."
@@ -3325,8 +3325,8 @@ class AgentManager:
         self.sessions.pop(session_id, None)
         self.tasks.pop(session_id, None)
         self._live_partial.pop(session_id, None)
-        p_view_builder_render_retry_counts.pop(session_id, None)
-        p_view_builder_dirty_sessions.discard(session_id)
+        view_builder_render_retry_counts.pop(session_id, None)
+        view_builder_dirty_sessions.discard(session_id)
 
     async def delete_session(self, session_id: str) -> None:
         """Permanently delete a session: remove from memory and JSON file.

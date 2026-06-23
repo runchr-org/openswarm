@@ -18,16 +18,16 @@ def test_purge_session_memory_clears_every_structure():
     mgr.sessions = {"dead": object(), "alive": object()}
     mgr.tasks = {"dead": object()}
     mgr._live_partial = {"dead": {"text": "half a reply"}}
-    am.p_view_builder_render_retry_counts["dead"] = 4
-    am.p_view_builder_dirty_sessions.add("dead")
+    am.view_builder_render_retry_counts["dead"] = 4
+    am.view_builder_dirty_sessions.add("dead")
 
     mgr._purge_session_memory("dead")
 
     assert "dead" not in mgr.sessions
     assert "dead" not in mgr.tasks
     assert "dead" not in mgr._live_partial
-    assert "dead" not in am.p_view_builder_render_retry_counts
-    assert "dead" not in am.p_view_builder_dirty_sessions
+    assert "dead" not in am.view_builder_render_retry_counts
+    assert "dead" not in am.view_builder_dirty_sessions
     # Only the target id is purged; an unrelated live session survives.
     assert "alive" in mgr.sessions
 

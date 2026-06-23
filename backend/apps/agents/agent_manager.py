@@ -7,7 +7,7 @@ import sys
 import time
 from datetime import datetime
 from uuid import uuid4
-from typing import Optional
+from typing import Dict, Optional
 
 from backend.apps.agents.core.models import (
     AgentConfig, AgentSession, Message, MessageBranch, ApprovalRequest, ToolGroupMeta,
@@ -444,7 +444,7 @@ class AgentManager:
         _router_model_id = _resolve_model_id_early(session.model, load_settings())
         _api_type_for_session = _get_api_type_early(session.model)
 
-        _builtin_perms = load_builtin_permissions()
+        builtin_perms = load_builtin_permissions()
 
         # Per-tool DEFAULT policy (overridden by anything the user has set
         # explicitly in builtin_permissions.json). Bash defaults to
@@ -455,20 +455,20 @@ class AgentManager:
         # poisoned-email -> destructive-command case is still caught; what
         # this trades away is the prompt on ordinary shell commands. Users
         # who want a prompt on every command can flip Bash to "ask" in the UI.
-        _DEFAULTS: dict[str, str] = {}
+        policy_defaults: Dict[str, str] = {}
 
         async def can_use_tool(tool_name, input_data, context):
             sensitive_pattern: str | None = None
             if tool_name != "AskUserQuestion":
                 policy, sensitive_pattern = path_gate.maybe_override_policy(
-                    effective_policy(tool_name, _builtin_perms, _DEFAULTS), tool_name, input_data
+                    effective_policy(tool_name, builtin_perms, policy_defaults), tool_name, input_data
                 )
                 if policy == "always_allow":
                     return PermissionResultAllow(updated_input=input_data)
                 if policy == "deny":
                     return PermissionResultDeny(message="Tool denied by permission policy")
 
-            decision = await request_user_approval(session, session_id, tool_name, input_data, _builtin_perms, sensitive_pattern=sensitive_pattern)
+            decision = await request_user_approval(session, session_id, tool_name, input_data, builtin_perms, sensitive_pattern=sensitive_pattern)
             if decision.get("behavior") == "allow":
                 return PermissionResultAllow(
                     updated_input=decision.get("updated_input", input_data)
@@ -559,7 +559,7 @@ class AgentManager:
             if tool_name and tool_name != "AskUserQuestion":
                 tool_input = input_data.get("tool_input", {})
                 policy, sensitive_pattern = path_gate.maybe_override_policy(
-                    effective_policy(tool_name, _builtin_perms, _DEFAULTS), tool_name, tool_input
+                    effective_policy(tool_name, builtin_perms, policy_defaults), tool_name, tool_input
                 )
 
                 if policy == "deny":
@@ -572,7 +572,7 @@ class AgentManager:
                     }
 
                 if policy == "ask":
-                    decision = await request_user_approval(session, session_id, tool_name, tool_input, _builtin_perms, sensitive_pattern=sensitive_pattern)
+                    decision = await request_user_approval(session, session_id, tool_name, tool_input, builtin_perms, sensitive_pattern=sensitive_pattern)
 
                     if decision.get("behavior") == "allow":
                         if tool_use_id:
@@ -941,7 +941,7 @@ class AgentManager:
 
             _browser_delegation_tools = ["CreateBrowserAgent", "BrowserAgent", "BrowserAgents"]
             _browser_all_denied = all(
-                _builtin_perms.get(t, "always_allow") == "deny"
+                builtin_perms.get(t, "always_allow") == "deny"
                 for t in _browser_delegation_tools
             )
 
@@ -973,7 +973,7 @@ class AgentManager:
 
             _invoke_agent_tools = ["InvokeAgent"]
             _invoke_all_denied = all(
-                _builtin_perms.get(t, "always_allow") == "deny"
+                builtin_perms.get(t, "always_allow") == "deny"
                 for t in _invoke_agent_tools
             )
 
@@ -1123,12 +1123,12 @@ class AgentManager:
 
             effective_allowed = [
                 t for t in session.allowed_tools
-                if t in FULL_TOOLS and _builtin_perms.get(t, "always_allow") == "always_allow"
+                if t in FULL_TOOLS and builtin_perms.get(t, "always_allow") == "always_allow"
             ]
 
             effective_disallowed = [
                 t for t in FULL_TOOLS
-                if _builtin_perms.get(t, "always_allow") == "deny"
+                if builtin_perms.get(t, "always_allow") == "deny"
             ]
 
             if mcp_servers:
@@ -1136,7 +1136,7 @@ class AgentManager:
                 for name in mcp_servers:
                     if name == "openswarm-browser-agent":
                         for bt in _browser_delegation_tools:
-                            policy = _builtin_perms.get(bt, "always_allow")
+                            policy = builtin_perms.get(bt, "always_allow")
                             if policy == "always_allow":
                                 effective_allowed.append(f"mcp__openswarm-browser-agent__{bt}")
                             elif policy == "deny":
@@ -1145,7 +1145,7 @@ class AgentManager:
 
                     if name == "openswarm-invoke-agent":
                         for it in _invoke_agent_tools:
-                            policy = _builtin_perms.get(it, "always_allow")
+                            policy = builtin_perms.get(it, "always_allow")
                             if policy == "always_allow":
                                 effective_allowed.append(f"mcp__openswarm-invoke-agent__{it}")
                             elif policy == "deny":
@@ -1158,7 +1158,7 @@ class AgentManager:
                         #, if the user disabled them in Settings, don't offer
                         # the MCP variants either.
                         for wt in ("WebSearch", "WebFetch"):
-                            policy = _builtin_perms.get(wt, "always_allow")
+                            policy = builtin_perms.get(wt, "always_allow")
                             if policy == "always_allow":
                                 effective_allowed.append(f"mcp__openswarm-web__{wt}")
                             elif policy == "deny":

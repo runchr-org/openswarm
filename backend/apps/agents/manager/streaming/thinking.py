@@ -4,7 +4,7 @@ Lifted out of the agent loop; operates on the passed TurnState/ThinkingState + s
 
 import asyncio
 import time
-from typing import Dict
+from typing import Dict, Optional
 from uuid import uuid4
 
 from typeguard import typechecked
@@ -37,7 +37,7 @@ async def emit_consolidated_thinking(thinking: ThinkingState, turn: TurnState, s
          show a pill even when 9Router can't surface a
          token count.
     """
-    upstream_reasoning_tokens: int | None = None
+    upstream_reasoning_tokens: Optional[int] = None
     # Probe 9Router for the upstream reasoning-token count
     # whenever (a) there's no in-process text, OR (b) the
     # caller flagged this as a force-emit for a route that
@@ -84,7 +84,7 @@ async def emit_consolidated_thinking(thinking: ThinkingState, turn: TurnState, s
         + turn.tool_input_chars
     )
     heuristic_tokens = max(1, round(running_chars / 3.6)) if running_chars else 0
-    turn_tokens: int | None = None
+    turn_tokens: Optional[int] = None
     # Priority order:
     #   1. Upstream reasoning-token count from 9Router (the
     #      only honest signal for GPT/Gemini, captured above).
@@ -188,7 +188,7 @@ async def emit_consolidated_thinking(thinking: ThinkingState, turn: TurnState, s
     # estimate to strip the cached static prefix out of the full
     # input number, and the fresh lane already excludes that prefix
     # exactly, so subtracting it again would double-discount to ~0.
-    turn_total_tokens: int | None = (
+    turn_total_tokens: Optional[int] = (
         parent_in + parent_out + children_in + children_out
     )
     if not turn_total_tokens or turn_total_tokens <= 0:

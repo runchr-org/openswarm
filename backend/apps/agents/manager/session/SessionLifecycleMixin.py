@@ -6,17 +6,19 @@ import asyncio
 import logging
 import os
 from datetime import datetime
-from typing import Optional
+from typing import Dict, List, Optional, Set
+
+from typeguard import typechecked
 
 from backend.apps.agents.core.models import AgentSession
 from backend.apps.agents.core.ws_manager import ws_manager
 from backend.apps.agents.manager.session.session_store import (
-    _delete_session_file,
-    _load_all_session_data,
-    _save_session,
+    _delete_session_file as delete_session_file,
+    _load_all_session_data as load_all_session_data,
+    _save_session as save_session,
     build_search_text,
 )
-from backend.apps.agents.manager.session.cloud_sync import _sync_session_close
+from backend.apps.agents.manager.session.cloud_sync import _sync_session_close as sync_session_close
 from backend.apps.agents.manager.session.apply_context_window import apply_context_window
 from backend.apps.agents.manager.session import lifecycle
 from backend.apps.agents.manager.view_builder_state import (
@@ -29,12 +31,15 @@ logger = logging.getLogger(__name__)
 
 class SessionLifecycleMixin:
     @staticmethod
-    def _build_search_text(session: AgentSession, max_len: int = 5000) -> str:
+    @typechecked
+    def p_build_search_text(session: AgentSession, max_len: int = 5000) -> str:
         return build_search_text(session, max_len)
 
-    def _sync_session_close(self, session: AgentSession, close_reason: str = "user"):
-        _sync_session_close(session, close_reason)
+    @typechecked
+    def p_sync_session_close(self, session: AgentSession, close_reason: str = "user"):
+        sync_session_close(session, close_reason)
 
+    @typechecked
     async def close_session(self, session_id: str) -> None:
         """Close a session: pause the agent if running, persist to JSON file,
         and remove from in-memory state. Also stops browser-agent children."""
@@ -68,12 +73,12 @@ class SessionLifecycleMixin:
         if hasattr(session, '_cancel_event'):
             session._cancel_event.set()
 
-        self._sync_session_close(session)
+        self.p_sync_session_close(session)
 
         doc_data = session.model_dump(mode="json")
-        doc_data["search_text"] = self._build_search_text(session)
+        doc_data["search_text"] = self.p_build_search_text(session)
 
-        _save_session(session_id, doc_data)
+        save_session(session_id, doc_data)
 
         await ws_manager.send_to_session(session_id, "agent:closed", {
             "session_id": session_id,
@@ -87,10 +92,11 @@ class SessionLifecycleMixin:
             "dashboard_id": session.dashboard_id,
         })
 
-        self._purge_session_memory(session_id)
+        self.p_purge_session_memory(session_id)
         logger.info(f"Session {session_id} closed and persisted")
 
-    def _purge_session_memory(self, session_id: str) -> None:
+    @typechecked
+    def p_purge_session_memory(self, session_id: str) -> None:
         """Drop a session from EVERY in-memory structure keyed by its id, so a
         close or delete can't strand stale per-session state that lives until
         the process dies. One chokepoint on purpose: a new per-session cache
@@ -101,6 +107,7 @@ class SessionLifecycleMixin:
         view_builder_render_retry_counts.pop(session_id, None)
         view_builder_dirty_sessions.discard(session_id)
 
+    @typechecked
     async def delete_session(self, session_id: str) -> None:
         """Permanently delete a session: remove from memory and JSON file.
         Also stops browser-agent children first."""
@@ -119,11 +126,12 @@ class SessionLifecycleMixin:
             except asyncio.CancelledError:
                 pass
 
-        self._purge_session_memory(session_id)
+        self.p_purge_session_memory(session_id)
 
-        _delete_session_file(session_id)
+        delete_session_file(session_id)
         logger.info(f"Session {session_id} permanently deleted")
 
+    @typechecked
     async def resume_session(self, session_id: str) -> AgentSession:
         if session_id in self.sessions:
             return self.sessions[session_id]
@@ -137,15 +145,16 @@ class SessionLifecycleMixin:
         logger.info(f"Session {session_id} resumed from history")
         return session
 
+    @typechecked
     def get_history(
         self,
         q: str = "",
         limit: int = 20,
         offset: int = 0,
-        dashboard_id: str | None = None,
-    ) -> dict:
+        dashboard_id: Optional[str] = None,
+    ) -> Dict:
         """Return paginated, optionally filtered summaries of closed sessions."""
-        all_data = _load_all_session_data()
+        all_data = load_all_session_data()
         all_data.sort(key=lambda pair: pair[1].get("closed_at") or "", reverse=True)
 
         q_lower = q.strip().lower()
@@ -178,9 +187,10 @@ class SessionLifecycleMixin:
             "has_more": offset + limit < total,
         }
 
+    @typechecked
     async def reconcile_on_startup(self) -> None:
         """Mark any stale running sessions as stopped."""
-        for sid, data in _load_all_session_data():
+        for sid, data in load_all_session_data():
             dirty = False
             if data.get("status") in ("running", "waiting_approval"):
                 data["status"] = "stopped"
@@ -192,8 +202,9 @@ class SessionLifecycleMixin:
                 data["mode"] = "ask"
                 dirty = True
             if dirty:
-                _save_session(sid, data)
+                save_session(sid, data)
 
+    @typechecked
     async def persist_all_sessions(self) -> None:
         """Flush every in-memory session to JSON files (for graceful shutdown)."""
         for session_id, session in list(self.sessions.items()):
@@ -206,14 +217,15 @@ class SessionLifecycleMixin:
             # Tag this close as "shutdown" so the cloud can tell it apart
             # from a user-initiated close. The desktop doesn't care; the
             # tag rides along in the dump for whoever consumes it.
-            self._sync_session_close(session, close_reason="shutdown")
+            self.p_sync_session_close(session, close_reason="shutdown")
             doc_data = session.model_dump(mode="json")
-            doc_data["search_text"] = self._build_search_text(session)
-            _save_session(session_id, doc_data)
+            doc_data["search_text"] = self.p_build_search_text(session)
+            save_session(session_id, doc_data)
             logger.info(f"Persisted session {session_id} on shutdown")
         self.sessions.clear()
         self.tasks.clear()
 
+    @typechecked
     async def restore_all_sessions(self) -> None:
         """On startup, reload all persisted sessions from JSON files back into memory.
 
@@ -221,7 +233,7 @@ class SessionLifecycleMixin:
         shutdown).  Sessions with closed_at were explicitly closed by the user
         and stay on disk so the history endpoint can still serve them.
         """
-        for sid, data in _load_all_session_data():
+        for sid, data in load_all_session_data():
             try:
                 session = AgentSession(**data)
             except Exception as e:
@@ -234,10 +246,11 @@ class SessionLifecycleMixin:
             session.pending_approvals = []
             apply_context_window(session)
             self.sessions[session.id] = session
-            _delete_session_file(sid)
+            delete_session_file(sid)
             logger.info(f"Restored session {session.id}")
 
-    async def duplicate_session(self, session_id: str, dashboard_id: str | None = None, up_to_message_id: str | None = None) -> AgentSession:
+    @typechecked
+    async def duplicate_session(self, session_id: str, dashboard_id: Optional[str] = None, up_to_message_id: Optional[str] = None) -> AgentSession:
         new_session = lifecycle.build_duplicate_session(self.sessions.get(session_id), session_id, dashboard_id, up_to_message_id)
         self.sessions[new_session.id] = new_session
         await ws_manager.send_to_session(new_session.id, "agent:status", {
@@ -247,7 +260,8 @@ class SessionLifecycleMixin:
         })
         return new_session
 
-    def get_all_sessions(self, dashboard_id: str | None = None) -> list[AgentSession]:
+    @typechecked
+    def get_all_sessions(self, dashboard_id: Optional[str] = None) -> List[AgentSession]:
         if not dashboard_id:
             return list(self.sessions.values())
         # Memory first, then promote on-disk sessions for this dashboard, but
@@ -259,8 +273,8 @@ class SessionLifecycleMixin:
         # once per session per run, like resume_session.
         result = [s for s in self.sessions.values() if s.dashboard_id == dashboard_id]
         seen = {s.id for s in result}
-        card_ids = self._dashboard_card_ids(dashboard_id)
-        for sid, data in _load_all_session_data():
+        card_ids = self.p_dashboard_card_ids(dashboard_id)
+        for sid, data in load_all_session_data():
             if sid in seen or sid not in card_ids:
                 continue
             if data.get("dashboard_id") != dashboard_id:
@@ -275,32 +289,35 @@ class SessionLifecycleMixin:
             result.append(sess)
         return result
 
-    def _dashboard_card_ids(self, dashboard_id: str) -> set[str]:
+    @typechecked
+    def p_dashboard_card_ids(self, dashboard_id: str) -> Set[str]:
         """Session ids the dashboard's layout currently has agent cards for.
         Read straight off disk (no dashboards-module import, avoids a cycle)."""
         try:
             import os
-            import backend.config.paths as _paths
+            import backend.config.paths as config_paths
             from backend.config.json_store import read_json_or_none
-            d = read_json_or_none(os.path.join(_paths.DASHBOARDS_DIR, f"{dashboard_id}.json")) or {}
+            d = read_json_or_none(os.path.join(config_paths.DASHBOARDS_DIR, f"{dashboard_id}.json")) or {}
             return set((d.get("layout", {}).get("cards") or {}).keys())
         except Exception:
             return set()
 
+    @typechecked
     def get_session(self, session_id: str) -> Optional[AgentSession]:
         return self.sessions.get(session_id)
 
-    def get_browser_agent_children(self, parent_session_id: str) -> list[dict]:
+    @typechecked
+    def get_browser_agent_children(self, parent_session_id: str) -> List[dict]:
         """Return browser-agent sessions for a parent, from memory or disk."""
-        results: list[dict] = []
-        seen: set[str] = set()
+        results: List[dict] = []
+        seen: Set[str] = set()
 
         for s in self.sessions.values():
             if s.mode == "browser-agent" and s.parent_session_id == parent_session_id:
                 results.append(s.model_dump(mode="json"))
                 seen.add(s.id)
 
-        for sid, data in _load_all_session_data():
+        for sid, data in load_all_session_data():
             if sid in seen:
                 continue
             if data.get("mode") == "browser-agent" and data.get("parent_session_id") == parent_session_id:

@@ -1,9 +1,12 @@
 """User-facing message operations for AgentManager (send / stop / edit / branch / approve /
 update), split into a mixin to keep the manager file under the size ceiling. Pure relocation:
-self._run_agent_loop / self._upsert_message / self.sessions all resolve across the MRO as before."""
+self._run_agent_loop / self.sessions / self.stop_agent all resolve across the MRO as before."""
 
 import asyncio
 import logging
+from typing import Dict, List, Optional
+
+from typeguard import typechecked
 from datetime import datetime
 from uuid import uuid4
 
@@ -11,7 +14,10 @@ from backend.apps.agents.core.models import AgentSession, Message, MessageBranch
 from backend.apps.agents.core.ws_manager import ws_manager
 from backend.apps.settings.settings import load_settings
 from backend.apps.agents.manager import browser_dispatch
-from backend.apps.agents.manager.session.session_store import _load_session_data, _save_session
+from backend.apps.agents.manager.session.session_store import (
+    _load_session_data as load_session_data,
+    _save_session as save_session,
+)
 from backend.apps.agents.manager.session.apply_context_window import apply_context_window
 from backend.apps.agents.manager.prompt.tool_catalog import get_all_tool_names
 from backend.apps.agents.manager.prompt.prompt_context import resolve_mode
@@ -20,27 +26,28 @@ logger = logging.getLogger(__name__)
 
 
 class MessagingMixin:
+    @typechecked
     async def send_message(
         self,
         session_id: str,
         prompt: str,
-        mode: str | None = None,
-        model: str | None = None,
-        provider: str | None = None,
-        images: list | None = None,
-        context_paths: list | None = None,
-        forced_tools: list[str] | None = None,
-        attached_skills: list | None = None,
+        mode: Optional[str] = None,
+        model: Optional[str] = None,
+        provider: Optional[str] = None,
+        images: Optional[List] = None,
+        context_paths: Optional[List] = None,
+        forced_tools: Optional[List[str]] = None,
+        attached_skills: Optional[List] = None,
         hidden: bool = False,
-        selected_browser_ids: list[str] | None = None,
-        selected_app_output_ids: list[str] | None = None,
-        selected_setting_ids: list[str] | None = None,
-        client_message_id: str | None = None,
+        selected_browser_ids: Optional[List[str]] = None,
+        selected_app_output_ids: Optional[List[str]] = None,
+        selected_setting_ids: Optional[List[str]] = None,
+        client_message_id: Optional[str] = None,
     ):
         """Send a follow-up message to an existing session."""
         session = self.sessions.get(session_id)
         if not session:
-            data = _load_session_data(session_id)
+            data = load_session_data(session_id)
             if data:
                 session = AgentSession(**data)
                 apply_context_window(session)
@@ -63,8 +70,8 @@ class MessagingMixin:
             # responses with placeholder text). Forking starts a new CLI
             # session so history is re-sent fresh in whichever format the
             # new provider expects.
-            from backend.apps.agents.providers.registry import get_api_type as _get_api_type_for_model
-            if _get_api_type_for_model(session.model) != _get_api_type_for_model(model):
+            from backend.apps.agents.providers.registry import get_api_type as get_api_type_for_model
+            if get_api_type_for_model(session.model) != get_api_type_for_model(model):
                 session.needs_fork = True
                 logger.info(f"[MCP-DEBUG] Forking session: api_type changed {session.model}→{model}")
 
@@ -147,10 +154,10 @@ class MessagingMixin:
         if not hidden:
             try:
                 from backend.apps.agents.browser import browser_fast_path
-                _extras = bool(images or context_paths or forced_tools or attached_skills
+                extras = bool(images or context_paths or forced_tools or attached_skills
                                or len(selected_browser_ids or []) > 1)
                 if browser_fast_path.fast_path_eligible(
-                    prompt, session.mode or "", session.dashboard_id, is_first_message, _extras,
+                    prompt, session.mode or "", session.dashboard_id, is_first_message, extras,
                 ):
                     from backend.apps.agents.providers.registry import get_api_type
                     fast_verdict, fast_brief = await browser_fast_path.classify_and_brief(
@@ -165,6 +172,7 @@ class MessagingMixin:
             task = asyncio.create_task(self._run_agent_loop(session_id, prompt, images=images, context_paths=context_paths, forced_tools=forced_tools, attached_skills=attached_skills, selected_browser_ids=selected_browser_ids, selected_app_output_ids=selected_app_output_ids, selected_setting_ids=selected_setting_ids))
         self.tasks[session_id] = task
 
+    @typechecked
     async def stop_agent(self, session_id: str):
         """Stop a running agent and all its browser-agent children."""
         # Stop children first so browser agents get cancelled before parent
@@ -205,7 +213,7 @@ class MessagingMixin:
             # longer the live task once we pop it below), so persist the partial
             # here or it'd live only in memory until the next turn / shutdown.
             try:
-                _save_session(session_id, session.model_dump(mode="json"))
+                save_session(session_id, session.model_dump(mode="json"))
             except Exception:
                 pass
 
@@ -218,10 +226,12 @@ class MessagingMixin:
             task.cancel()
             asyncio.create_task(self._drain_task(task))
 
-    def handle_approval(self, request_id: str, decision: dict):
+    @typechecked
+    def handle_approval(self, request_id: str, decision: Dict):
         """Resolve a pending HITL approval."""
         ws_manager.resolve_approval(request_id, decision)
 
+    @typechecked
     async def edit_message(self, session_id: str, message_id: str, new_content: str):
         """Edit a prior user message, creating a new branch (fork)."""
         session = self.sessions.get(session_id)
@@ -308,6 +318,7 @@ class MessagingMixin:
         ))
         self.tasks[session_id] = task
 
+    @typechecked
     async def switch_branch(self, session_id: str, branch_id: str):
         session = self.sessions.get(session_id)
         if not session:
@@ -321,6 +332,7 @@ class MessagingMixin:
             "active_branch_id": branch_id,
         })
 
+    @typechecked
     async def update_session(self, session_id: str, **fields):
         """Update mutable session fields (system_prompt, name)."""
         session = self.sessions.get(session_id)

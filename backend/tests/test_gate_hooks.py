@@ -10,6 +10,7 @@ from claude_agent_sdk import PermissionResultAllow, PermissionResultDeny
 from backend.apps.agents.core.models import AgentSession
 from backend.apps.agents.manager.streaming.hook_context import HookContext
 from backend.apps.agents.manager.permissions import gate_hooks
+from backend.apps.agents.manager.permissions.ApprovalDecision import ApprovalDecision
 from backend.apps.agents.manager.prompt.prompt_context import TOOLSEARCH_LOOP_THRESHOLD
 
 
@@ -45,7 +46,7 @@ async def test_can_use_tool_deny_returns_deny():
 async def test_can_use_tool_ask_routes_through_approval():
     ctx = _ctx()
     with patch.object(gate_hooks.path_gate, "maybe_override_policy", return_value=("ask", None)), \
-         patch.object(gate_hooks, "request_user_approval", new=AsyncMock(return_value={"behavior": "allow"})):
+         patch.object(gate_hooks, "request_user_approval", new=AsyncMock(return_value=ApprovalDecision(behavior="allow"))):
         result = await gate_hooks.can_use_tool(ctx, "Write", {"file_path": "/x"}, None)
     assert isinstance(result, PermissionResultAllow)
 

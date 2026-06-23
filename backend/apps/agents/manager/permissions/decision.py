@@ -15,6 +15,7 @@ from typeguard import typechecked
 from backend.apps.agents.core.models import AgentSession, ApprovalRequest
 from backend.apps.agents.core.ws_manager import ws_manager
 from backend.apps.agents.manager.permissions import path_gate
+from backend.apps.agents.manager.permissions.ApprovalDecision import ApprovalDecision
 from backend.apps.tools_lib.tools_lib import (
     _load_all as load_all_tools,
     _save as save_tool,
@@ -71,7 +72,7 @@ async def request_user_approval(
     tool_input: object,
     builtin_perms: Dict[str, str],
     sensitive_pattern: Optional[str] = None,
-) -> Dict[str, object]:
+) -> ApprovalDecision:
     """Send an approval request over WS and wait for the user's decision."""
     safe_input = tool_input if isinstance(tool_input, dict) else {}
     request_id = uuid4().hex
@@ -95,16 +96,16 @@ async def request_user_approval(
         "session_id": session_id,
         "status": "waiting_approval",
     })
-    decision = await ws_manager.send_approval_request(
+    decision = ApprovalDecision.model_validate(await ws_manager.send_approval_request(
         session_id, request_id, tool_name, safe_input,
         sensitive_pattern=sensitive_pattern,
         sensitive_label=label,
         sensitive_why=why,
-    )
+    ))
     # Persist a trusted sensitive-path so later prompts for the same pattern skip the modal.
     if (
-        decision.get("behavior") == "allow"
-        and decision.get("trust_pattern")
+        decision.behavior == "allow"
+        and decision.trust_pattern
         and sensitive_pattern
     ):
         try:
@@ -115,7 +116,7 @@ async def request_user_approval(
         except Exception:
             logger.exception("Failed to persist trusted sensitive path")
     # "Always approve": persist the tool policy (the sensitive/catastrophic guards still re-fire).
-    if decision.get("behavior") == "allow" and decision.get("set_always_allow"):
+    if decision.behavior == "allow" and decision.set_always_allow:
         try:
             set_tool_policy(tool_name, "always_allow", builtin_perms)
         except Exception:
@@ -124,7 +125,7 @@ async def request_user_approval(
     try:
         session.approval_decisions.append({
             "tool": tool_name,
-            "behavior": decision.get("behavior"),
+            "behavior": decision.behavior,
             "decision_ms": approval_latency_ms,
         })
     except Exception:

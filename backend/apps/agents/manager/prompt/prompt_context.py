@@ -5,7 +5,7 @@ from backend.apps.tools_lib.tools_lib import (
     _load_all as load_all_tools,
     _sanitize_server_name,
 )
-from backend.apps.agents.manager.prompt.tool_catalog import _get_denied_tool_names, _is_fully_denied
+from backend.apps.agents.manager.prompt.tool_catalog import get_denied_tool_names, is_fully_denied
 
 
 def resolve_mode(mode_id: str, get_all_tool_names: Callable[[], list[str]]) -> tuple[list[str], str | None, str | None]:
@@ -31,11 +31,11 @@ def build_connected_tools_context(allowed_tools: list[str], get_all_tool_names: 
         if tool_ref not in allowed_tools and allowed_tools != get_all_tool_names():
             continue
 
-        if _is_fully_denied(tool):
+        if is_fully_denied(tool):
             continue
 
         server_name = _sanitize_server_name(tool.name)
-        denied = _get_denied_tool_names(tool)
+        denied = get_denied_tool_names(tool)
         tool_descs = {
             k: v for k, v in tool.tool_permissions.get("_tool_descriptions", {}).items()
             if k not in denied
@@ -312,7 +312,7 @@ def build_mcp_registry_summary(allowed_tools: list[str], active_mcps: list[str],
         tool_ref = f"mcp:{tool.name}"
         if tool_ref not in allowed_tools and allowed_tools != get_all_tool_names():
             continue
-        if _is_fully_denied(tool):
+        if is_fully_denied(tool):
             continue
         server_name = _sanitize_server_name(tool.name)
         desc = (getattr(tool, "description", None) or "").strip()

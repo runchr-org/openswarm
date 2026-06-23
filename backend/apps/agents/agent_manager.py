@@ -71,9 +71,9 @@ from backend.apps.agents.manager.view_builder_state import (
 from backend.apps.agents.manager.session.workspace_git import _detect_git_identity, _ensure_cwd_git_repo
 from backend.apps.agents.manager.prompt.tool_catalog import (
     FULL_TOOLS,
-    _get_all_known_tool_names,
-    _get_denied_tool_names,
-    _is_fully_denied,
+    get_all_known_tool_names,
+    get_denied_tool_names,
+    is_fully_denied,
     gated_mcp_server_names,
     get_all_tool_names,
 )
@@ -151,7 +151,7 @@ class AgentManager:
                 logger.info(f"[MCP-DEBUG] GATED {server_name}: not in session.active_mcps, model must call MCPActivate first")
                 continue
 
-            if _is_fully_denied(tool):
+            if is_fully_denied(tool):
                 logger.info(f"[MCP-DEBUG] SKIPPED {tool.name}: fully denied")
                 continue
 
@@ -642,8 +642,8 @@ class AgentManager:
                         None,
                     )
                     if tool_def:
-                        denied = _get_denied_tool_names(tool_def)
-                        known = _get_all_known_tool_names(tool_def)
+                        denied = get_denied_tool_names(tool_def)
+                        known = get_all_known_tool_names(tool_def)
                         for tn in known - denied:
                             policy = tool_def.tool_permissions.get(tn, "ask")
                             if policy == "always_allow":

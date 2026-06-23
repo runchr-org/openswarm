@@ -645,7 +645,7 @@ async def test_mcp_gate_only_forwards_activated_servers():
     with patch("backend.apps.agents.agent_manager.load_all_tools", side_effect=installed), \
          patch("backend.apps.agents.agent_manager.get_all_tool_names", return_value=["__ALL__"]), \
          patch("backend.apps.agents.agent_manager._sanitize_server_name", side_effect=lambda n: n), \
-         patch("backend.apps.agents.agent_manager._is_fully_denied", return_value=False), \
+         patch("backend.apps.agents.agent_manager.is_fully_denied", return_value=False), \
          patch("backend.apps.agents.agent_manager.derive_mcp_config", side_effect=lambda t: {"command": "x"}):
         allowed = ["__ALL__"]
         # Boundary 1: empty activation list -> zero servers, always.
@@ -1169,13 +1169,13 @@ def test_custom_provider_round_trip():
 @pytest.mark.asyncio
 async def test_gate_partially_denied_tool_blocked():
     """If permissions has _entirely_denied=True it's blocked."""
-    from backend.apps.agents.agent_manager import _is_fully_denied
+    from backend.apps.agents.agent_manager import is_fully_denied
     fake = _fake_tool("Gmail", permissions={
         "_tool_descriptions": {"send_email": "Send email"},
         "send_email": "deny",
     })
-    # Build a minimal class that has the perms_dict shape _is_fully_denied expects
-    assert _is_fully_denied(fake) in (True, False)
+    # Build a minimal class that has the perms_dict shape is_fully_denied expects
+    assert is_fully_denied(fake) in (True, False)
 
 
 @pytest.mark.asyncio

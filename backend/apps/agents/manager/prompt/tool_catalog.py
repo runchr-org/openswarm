@@ -1,11 +1,12 @@
 import logging
-from typing import List, Optional
+from typing import List, Optional, Set
 
 from typeguard import typechecked
 
+from backend.apps.tools_lib.models import ToolDefinition
 from backend.apps.tools_lib.tools_lib import (
     _load_all as load_all_tools,
-    _sanitize_server_name,
+    _sanitize_server_name as sanitize_server_name,
     load_builtin_permissions,
 )
 
@@ -27,7 +28,8 @@ FULL_TOOLS = [
 ]
 
 
-def _get_denied_tool_names(tool) -> set[str]:
+@typechecked
+def get_denied_tool_names(tool: ToolDefinition) -> Set[str]:
     """Return the set of MCP sub-tool names whose permission is 'deny'."""
     return {
         key for key, value in tool.tool_permissions.items()
@@ -35,17 +37,19 @@ def _get_denied_tool_names(tool) -> set[str]:
     }
 
 
-def _get_all_known_tool_names(tool) -> set[str]:
+@typechecked
+def get_all_known_tool_names(tool: ToolDefinition) -> Set[str]:
     """Return all known sub-tool names for an MCP tool (from _tool_descriptions)."""
     return set(tool.tool_permissions.get("_tool_descriptions", {}).keys())
 
 
-def _is_fully_denied(tool) -> bool:
+@typechecked
+def is_fully_denied(tool: ToolDefinition) -> bool:
     """True when every known sub-tool on this MCP server is set to 'deny'."""
-    known = _get_all_known_tool_names(tool)
+    known = get_all_known_tool_names(tool)
     if not known:
         return False
-    return known <= _get_denied_tool_names(tool)
+    return known <= get_denied_tool_names(tool)
 
 
 @typechecked
@@ -65,7 +69,7 @@ def get_all_tool_names() -> List[str]:
         if t.mcp_config
         and t.enabled
         and t.auth_status in ("configured", "connected")
-        and not _is_fully_denied(t)
+        and not is_fully_denied(t)
     ]
     return builtin_tools + mcp_names
 
@@ -85,9 +89,9 @@ def gated_mcp_server_names(allowed_tools: List[str], active_mcps: Optional[List[
             tool_ref = f"mcp:{tool.name}"
             if tool_ref not in allowed_tools and allowed_tools != get_all_tool_names():
                 continue
-            if _is_fully_denied(tool):
+            if is_fully_denied(tool):
                 continue
-            server_name = _sanitize_server_name(tool.name)
+            server_name = sanitize_server_name(tool.name)
             if server_name not in active_set:
                 names.append(server_name)
     except Exception:

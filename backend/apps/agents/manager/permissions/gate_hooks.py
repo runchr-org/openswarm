@@ -43,12 +43,12 @@ async def can_use_tool(
     decision = await request_user_approval(
         ctx.session, ctx.session_id, tool_name, input_data, ctx.builtin_perms, sensitive_pattern=sensitive_pattern
     )
-    if decision.get("behavior") == "allow":
+    if decision.behavior == "allow":
         return PermissionResultAllow(
-            updated_input=decision.get("updated_input", input_data)
+            updated_input=decision.updated_input if decision.updated_input is not None else input_data
         )
     return PermissionResultDeny(
-        message=decision.get("message", "User denied this action")
+        message=decision.message or "User denied this action"
     )
 
 
@@ -144,7 +144,7 @@ async def pre_tool_hook(ctx: HookContext, input_data: dict, tool_use_id: Optiona
                 ctx.session, ctx.session_id, tool_name, tool_input, ctx.builtin_perms, sensitive_pattern=sensitive_pattern
             )
 
-            if decision.get("behavior") == "allow":
+            if decision.behavior == "allow":
                 if tool_use_id:
                     ctx.tool_start_times[tool_use_id] = time.time()
                 return {
@@ -157,7 +157,7 @@ async def pre_tool_hook(ctx: HookContext, input_data: dict, tool_use_id: Optiona
                 "hookSpecificOutput": {
                     "hookEventName": hook_event,
                     "permissionDecision": "deny",
-                    "permissionDecisionReason": decision.get("message", "User denied this action"),
+                    "permissionDecisionReason": decision.message or "User denied this action",
                 }
             }
 

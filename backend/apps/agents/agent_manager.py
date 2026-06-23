@@ -56,6 +56,7 @@ from backend.apps.agents.manager.session.apply_context_window import apply_conte
 from backend.apps.agents.manager.session import lifecycle
 from backend.apps.agents.manager.permissions import path_gate
 from backend.apps.agents.manager import context_budget
+from backend.apps.agents.manager.streaming.state import ThinkingState
 from backend.apps.agents.manager.session.workspace_git import _detect_git_identity, _ensure_cwd_git_repo
 from backend.apps.agents.manager.prompt.tool_catalog import (
     FULL_TOOLS,
@@ -1939,16 +1940,12 @@ class AgentManager:
             # incremental updates to the SAME persisted Message id so the
             # ThinkingBubble pill ticks live: "Thought for 18s · 412
             # tokens · 3 tools used". Reset only at turn boundaries.
-            _thinking_block_starts: dict[int, float] = {}
-            _thinking_total_ms: int = 0
-            _thinking_total_chars: int = 0
+            thinking = ThinkingState()
             # Persistent id for the turn's single thinking message. We
             # reuse it across multi-step turns so the frontend's
             # addMessage dedupe replaces the bubble in place rather
             # than stacking N pills above the answer. Reset at the
             # next user turn (next prompt_stream iteration).
-            _turn_thinking_msg_id: str | None = None
-            _turn_thinking_text_parts: list[str] = []
             _turn_tool_count: int = 0
             _turn_started_ts: float | None = None
             # Wall-clock turn duration (ms), covers thinking + tool
@@ -1981,7 +1978,6 @@ class AgentManager:
             # Google's reasoning-continuity check (the source of the
             # "Thought signature is not valid" 400). None for providers
             # that don't use signatures.
-            _turn_thought_signature: str | None = None
             # session.tokens accumulates SDK running totals across turns,
             # so subtract the turn-start baseline to get this turn's delta.
             _turn_baseline_session_in: int = 0
@@ -1994,7 +1990,6 @@ class AgentManager:
             # ticking through gaps where no SDK events fire (tool
             # execution, slow text generation). Started at first
             # AssistantMessage of the turn, cancelled at ResultMessage.
-            _ticker_task: asyncio.Task | None = None
             _turn_number = 0
             _first_event = True
             # True between the first non-ResultMessage of a turn and the
@@ -2030,7 +2025,7 @@ class AgentManager:
                      show a pill even when 9Router can't surface a
                      token count.
                 """
-                nonlocal _turn_thinking_msg_id, _turn_total_ms
+                nonlocal _turn_total_ms
                 upstream_reasoning_tokens: int | None = None
                 # Probe 9Router for the upstream reasoning-token count
                 # whenever (a) there's no in-process text, OR (b) the
@@ -2039,7 +2034,7 @@ class AgentManager:
                 # emit on GPT/Gemini show the real reasoning count
                 # (e.g. 196) instead of the heuristic chars/3.6 of the
                 # answer text (e.g. 13).
-                if not _turn_thinking_text_parts or force_provider_unavailable:
+                if not thinking.text_parts or force_provider_unavailable:
                     try:
                         from backend.apps.nine_router import (
                             get_latest_reasoning_tokens,
@@ -2052,14 +2047,14 @@ class AgentManager:
                     except Exception:
                         pass
                     if (
-                        not _turn_thinking_text_parts
+                        not thinking.text_parts
                         and upstream_reasoning_tokens is None
                         and not force_provider_unavailable
                     ):
                         # No text, no upstream signal, and caller didn't
                         # ask for the unavailable-pill, nothing to show.
                         return
-                joined_text = "\n".join(_turn_thinking_text_parts)
+                joined_text = "\n".join(thinking.text_parts)
                 # Total turn output token estimate. Combines two sources:
                 #   - SDK usage.output_tokens summed across completed
                 #     AssistantMessages (authoritative for finished
@@ -2115,8 +2110,8 @@ class AgentManager:
                         session.time_per_model[m] = int(session.time_per_model.get(m, 0)) + _turn_total_ms
                     except Exception:
                         pass
-                if _turn_thinking_msg_id is None:
-                    _turn_thinking_msg_id = uuid4().hex
+                if thinking.msg_id is None:
+                    thinking.msg_id = uuid4().hex
                 # Combined token total for the pill, input + output for
                 # the parent turn PLUS any work delegated to subagents
                 # (browser agents, invoke-agent forks) and tool MCP
@@ -2188,7 +2183,7 @@ class AgentManager:
                 if not _turn_total_tokens or _turn_total_tokens <= 0:
                     _turn_total_tokens = None
                 consolidated = Message(
-                    id=_turn_thinking_msg_id,
+                    id=thinking.msg_id,
                     role="thinking",
                     content=joined_text,
                     branch_id=session.active_branch_id,
@@ -2199,7 +2194,7 @@ class AgentManager:
                 )
                 existing_idx = next(
                     (i for i, m in enumerate(session.messages)
-                     if m.id == _turn_thinking_msg_id),
+                     if m.id == thinking.msg_id),
                     -1,
                 )
                 if existing_idx >= 0:
@@ -2236,12 +2231,9 @@ class AgentManager:
                 # nonlocal, the int reassignments at AssistantMessage emission
                 # below shadow them as locals and the dict access at
                 # content_block_start crashes with UnboundLocalError.
-                nonlocal _thinking_block_starts, _thinking_total_ms, _thinking_total_chars
-                nonlocal _turn_thinking_msg_id, _turn_thinking_text_parts
                 nonlocal _turn_tool_count, _turn_started_ts, _turn_total_ms
-                nonlocal _turn_output_tokens, _ticker_task
+                nonlocal _turn_output_tokens
                 nonlocal _turn_assistant_text_chars, _turn_tool_input_chars
-                nonlocal _turn_thought_signature
                 async for message in query(
                     prompt=prompt_stream(),
                     options=options,
@@ -2289,7 +2281,7 @@ class AgentManager:
                             # Pre-emitting here gives the pill the same
                             # ordering as Anthropic's natural streaming
                             # path. Updates in place at turn end via the
-                            # stable _turn_thinking_msg_id dedupe.
+                            # stable thinking.msg_id dedupe.
                             try:
                                 _route_strips_reasoning_pre = (
                                     isinstance(resolved_model, str)
@@ -2349,7 +2341,7 @@ class AgentManager:
                                 # per-turn elapsed_ms across multiple
                                 # thinking blocks (think → tool → think
                                 # → answer turns sum correctly).
-                                _thinking_block_starts[index] = time.time()
+                                thinking.block_starts[index] = time.time()
                                 await ws_manager.send_to_session(session_id, "agent:stream_start", {
                                     "session_id": session_id,
                                     "message_id": thinking_msg_id,
@@ -2407,7 +2399,7 @@ class AgentManager:
                                 # Thinking content streams as thinking_delta
                                 # with a "thinking" field (not "text")
                                 _think_chunk = delta.get("thinking", "")
-                                _thinking_total_chars += len(_think_chunk)
+                                thinking.total_chars += len(_think_chunk)
                                 await ws_manager.send_to_session(session_id, "agent:stream_delta", {
                                     "session_id": session_id,
                                     "message_id": msg_id,
@@ -2431,9 +2423,9 @@ class AgentManager:
                             #, the pill stays in "Thinking…" until the
                             # AssistantMessage lands carrying the per-turn
                             # aggregate values.
-                            if index in _thinking_block_starts:
-                                _thinking_total_ms += int(
-                                    (time.time() - _thinking_block_starts.pop(index)) * 1000
+                            if index in thinking.block_starts:
+                                thinking.total_ms += int(
+                                    (time.time() - thinking.block_starts.pop(index)) * 1000
                                 )
                             if msg_id and msg_id != stream_text_msg_id:
                                 await ws_manager.send_to_session(session_id, "agent:stream_end", {
@@ -2506,14 +2498,14 @@ class AgentManager:
                         # consolidated emit will still pick up the
                         # higher count.
                         if new_thinking_parts:
-                            _turn_thinking_text_parts.extend(new_thinking_parts)
+                            thinking.text_parts.extend(new_thinking_parts)
                         # Latch the most recent thoughtSignature, Gemini
                         # only validates against the LATEST one in the
                         # conversation history, so older signatures from
                         # earlier think-steps in the same turn are
                         # superseded by newer ones.
                         if new_thought_signature:
-                            _turn_thought_signature = new_thought_signature
+                            thinking.thought_signature = new_thought_signature
                         # Accumulate this message's total output tokens
                         # (SDK populates `usage.output_tokens` with the
                         # full output for the inference: thinking text +
@@ -2537,13 +2529,13 @@ class AgentManager:
                         # between events too, so the elapsed counter
                         # ticks even during tool execution / slow text
                         # generation gaps.
-                        if _turn_thinking_text_parts:
+                        if thinking.text_parts:
                             await _emit_consolidated_thinking()
                             # Start the 1Hz ticker once we have a
                             # consolidated message in flight so the
                             # bubble keeps updating between SDK events.
-                            if _ticker_task is None or _ticker_task.done():
-                                _ticker_task = asyncio.create_task(_ticker_loop())
+                            if thinking.ticker_task is None or thinking.ticker_task.done():
+                                thinking.ticker_task = asyncio.create_task(_ticker_loop())
 
                         if content_parts:
                             _asst_text = "\n".join(content_parts)
@@ -2694,37 +2686,37 @@ class AgentManager:
                             isinstance(resolved_model, str)
                             and resolved_model.startswith(("cx/", "gc/", "ag/", "gemini/"))
                         )
-                        if _turn_thinking_text_parts or _route_strips_reasoning:
+                        if thinking.text_parts or _route_strips_reasoning:
                             try:
                                 await _emit_consolidated_thinking(
                                     force_provider_unavailable=_route_strips_reasoning,
                                 )
                             except Exception:
                                 pass
-                        if _ticker_task is not None and not _ticker_task.done():
-                            _ticker_task.cancel()
+                        if thinking.ticker_task is not None and not thinking.ticker_task.done():
+                            thinking.ticker_task.cancel()
                             try:
-                                await _ticker_task
+                                await thinking.ticker_task
                             except (asyncio.CancelledError, Exception):
                                 pass
-                        _ticker_task = None
-                        _turn_thinking_msg_id = None
-                        _turn_thinking_text_parts = []
+                        thinking.ticker_task = None
+                        thinking.msg_id = None
+                        thinking.text_parts = []
                         _turn_tool_count = 0
                         _turn_started_ts = None
                         _turn_total_ms = 0
                         _turn_output_tokens = 0
                         _turn_assistant_text_chars = 0
                         _turn_tool_input_chars = 0
-                        _turn_thought_signature = None
+                        thinking.thought_signature = None
                         _turn_baseline_session_in = 0
                         _turn_baseline_session_out = 0
                         _turn_baseline_children_in = 0
                         _turn_baseline_children_out = 0
                         _turn_baseline_captured = False
-                        _thinking_total_ms = 0
-                        _thinking_total_chars = 0
-                        _thinking_block_starts = {}
+                        thinking.total_ms = 0
+                        thinking.total_chars = 0
+                        thinking.block_starts = {}
 
                         session.sdk_session_id = getattr(message, "session_id", None)
                         # Pull usage first; SDK's total_cost_usd is wrong for OR
@@ -2847,13 +2839,13 @@ class AgentManager:
                     # outlive the turn on error/retry. Without this, an
                     # exception mid-stream leaves a dangling task that
                     # keeps re-emitting against a stale msg id.
-                    if _ticker_task is not None and not _ticker_task.done():
-                        _ticker_task.cancel()
+                    if thinking.ticker_task is not None and not thinking.ticker_task.done():
+                        thinking.ticker_task.cancel()
                         try:
-                            await _ticker_task
+                            await thinking.ticker_task
                         except (asyncio.CancelledError, Exception):
                             pass
-                    _ticker_task = None
+                    thinking.ticker_task = None
                     stderr_snapshot = "\n".join(_stderr_buffer[-50:])
                     wait = capacity_retry_wait(e, capacity_retry_attempt, extra_text=stderr_snapshot)
                     if wait is not None:

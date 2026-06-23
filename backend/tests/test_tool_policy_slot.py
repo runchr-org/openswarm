@@ -45,7 +45,7 @@ def test_slot_for_unknown_mcp_has_no_write_target():
 
 
 # read/write mirror the dispatch-gate branches in agent_manager
-# (_get_effective_policy / _set_tool_policy): both key through resolve_policy_slot.
+# (effective_policy / set_tool_policy): both key through resolve_policy_slot.
 def _read(tool_name, builtin_perms, tools):
     slot = resolve_policy_slot(tool_name, tools)
     if slot.store == "builtin":

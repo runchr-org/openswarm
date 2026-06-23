@@ -58,6 +58,7 @@ from backend.apps.agents.manager.permissions import path_gate
 from backend.apps.agents.manager import context_budget
 from backend.apps.agents.manager.streaming.state import ThinkingState, TurnState
 from backend.apps.agents.manager.streaming import thinking as thinking_mod
+from backend.apps.agents.manager.permissions.decision import effective_policy, request_user_approval
 from backend.apps.agents.manager.session.workspace_git import _detect_git_identity, _ensure_cwd_git_repo
 from backend.apps.agents.manager.prompt.tool_catalog import (
     FULL_TOOLS,
@@ -456,140 +457,18 @@ class AgentManager:
         # who want a prompt on every command can flip Bash to "ask" in the UI.
         _DEFAULTS: dict[str, str] = {}
 
-        def _default_for(tool_name: str) -> str:
-            return _DEFAULTS.get(tool_name, "always_allow")
-
-        def _get_effective_policy(tool_name: str) -> str:
-            """Return 'always_allow', 'deny', or 'ask' for any tool. Keyed through
-            the shared resolver so the read slot matches the write slot exactly."""
-            tools = load_all_tools()
-            slot = resolve_policy_slot(tool_name, tools)
-            if slot.store == "builtin":
-                return _builtin_perms.get(slot.key, _default_for(slot.key))
-            if slot.key is not None:
-                for t in tools:
-                    if t.id == slot.key:
-                        return t.tool_permissions.get(slot.action, "ask")
-            return _default_for(tool_name)
-
-        def _set_tool_policy(tool_name: str, policy: str) -> None:
-            """Inverse of _get_effective_policy: persist `policy` into the SAME slot
-            the gate reads, AND update the live in-memory snapshot, so an 'Always
-            approve' takes effect for this running agent, not only after a restart.
-            (The old code wrote the raw tool name to the file and never touched the
-            captured _builtin_perms, so it behaved like a one-time accept.)"""
-            tools = load_all_tools()
-            slot = resolve_policy_slot(tool_name, tools)
-            if slot.store == "builtin":
-                _builtin_perms[slot.key] = policy
-                perms = load_builtin_permissions()
-                perms[slot.key] = policy
-                save_builtin_permissions(perms)
-                return
-            if slot.key is not None:
-                for t in tools:
-                    if t.id == slot.key:
-                        t.tool_permissions[slot.action] = policy
-                        save_tool(t)
-                        return
-
-        async def _request_user_approval(
-            tool_name: str,
-            tool_input,
-            sensitive_pattern: str | None = None,
-        ) -> dict:
-            """Send an approval request via WebSocket and wait for the user's decision."""
-            safe_input = tool_input if isinstance(tool_input, dict) else {}
-            request_id = uuid4().hex
-            label, why = (None, None)
-            if sensitive_pattern:
-                described = path_gate.describe_sensitive_pattern(sensitive_pattern)
-                if described:
-                    label, why = described
-            approval_req = ApprovalRequest(
-                id=request_id,
-                session_id=session_id,
-                tool_name=tool_name,
-                tool_input=safe_input,
-                sensitive_pattern=sensitive_pattern,
-                sensitive_label=label,
-                sensitive_why=why,
-            )
-            session.pending_approvals.append(approval_req)
-            session.status = "waiting_approval"
-
-
-            await ws_manager.send_to_session(session_id, "agent:status", {
-                "session_id": session_id,
-                "status": "waiting_approval",
-            })
-
-            decision = await ws_manager.send_approval_request(
-                session_id, request_id, tool_name, safe_input,
-                sensitive_pattern=sensitive_pattern,
-                sensitive_label=label,
-                sensitive_why=why,
-            )
-            # If the user opted into trusting this pattern, persist now so
-            # any subsequent prompt against the same pattern (e.g. the
-            # PreToolUse hook re-evaluating after can_use_tool, or a later
-            # Write in the same session) skips the modal silently.
-            if (
-                decision.get("behavior") == "allow"
-                and decision.get("trust_pattern")
-                and sensitive_pattern
-            ):
-                try:
-                    existing = load_trusted_sensitive_paths()
-                    if sensitive_pattern not in existing:
-                        existing.append(sensitive_pattern)
-                        save_trusted_sensitive_paths(existing)
-                except Exception:
-                    logger.exception("Failed to persist trusted sensitive path")
-
-            # "Always approve" button: persist the tool's policy so it stops
-            # prompting. The guards above (sensitive/catastrophic) re-fire even
-            # on always_allow, so this can't disarm an rm -rf or a key-path write.
-            if decision.get("behavior") == "allow" and decision.get("set_always_allow"):
-                try:
-                    _set_tool_policy(tool_name, "always_allow")
-                except Exception:
-                    logger.exception("Failed to persist always-allow for %s", tool_name)
-
-            approval_latency_ms = int((datetime.now() - approval_req.created_at).total_seconds() * 1000)
-            try:
-                # Append to the session's approval log so a reload
-                # restores the full HITL timeline.
-                session.approval_decisions.append({
-                    "tool": tool_name,
-                    "behavior": decision.get("behavior"),
-                    "decision_ms": approval_latency_ms,
-                })
-            except Exception:
-                pass
-
-            session.pending_approvals = [
-                a for a in session.pending_approvals if a.id != request_id
-            ]
-            session.status = "running"
-            await ws_manager.send_to_session(session_id, "agent:status", {
-                "session_id": session_id,
-                "status": "running",
-            })
-            return decision
-
         async def can_use_tool(tool_name, input_data, context):
             sensitive_pattern: str | None = None
             if tool_name != "AskUserQuestion":
                 policy, sensitive_pattern = path_gate.maybe_override_policy(
-                    _get_effective_policy(tool_name), tool_name, input_data
+                    effective_policy(tool_name, _builtin_perms, _DEFAULTS), tool_name, input_data
                 )
                 if policy == "always_allow":
                     return PermissionResultAllow(updated_input=input_data)
                 if policy == "deny":
                     return PermissionResultDeny(message="Tool denied by permission policy")
 
-            decision = await _request_user_approval(tool_name, input_data, sensitive_pattern=sensitive_pattern)
+            decision = await request_user_approval(session, session_id, tool_name, input_data, _builtin_perms, sensitive_pattern=sensitive_pattern)
             if decision.get("behavior") == "allow":
                 return PermissionResultAllow(
                     updated_input=decision.get("updated_input", input_data)
@@ -680,7 +559,7 @@ class AgentManager:
             if tool_name and tool_name != "AskUserQuestion":
                 tool_input = input_data.get("tool_input", {})
                 policy, sensitive_pattern = path_gate.maybe_override_policy(
-                    _get_effective_policy(tool_name), tool_name, tool_input
+                    effective_policy(tool_name, _builtin_perms, _DEFAULTS), tool_name, tool_input
                 )
 
                 if policy == "deny":
@@ -693,7 +572,7 @@ class AgentManager:
                     }
 
                 if policy == "ask":
-                    decision = await _request_user_approval(tool_name, tool_input, sensitive_pattern=sensitive_pattern)
+                    decision = await request_user_approval(session, session_id, tool_name, tool_input, _builtin_perms, sensitive_pattern=sensitive_pattern)
 
                     if decision.get("behavior") == "allow":
                         if tool_use_id:

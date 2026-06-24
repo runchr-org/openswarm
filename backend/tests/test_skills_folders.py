@@ -37,28 +37,28 @@ def test_corrupt_index_does_not_brick_skills_and_is_preserved(skills_dir):
     with open(skills_dir / ".skills_index.json", "w") as f:
         f.write("{ not valid json")
     # Load returns empty instead of raising, and moves the bad file aside.
-    assert skills_mod._load_index() == {}
+    assert skills_mod.p_load_index() == {}
     assert (skills_dir / ".skills_index.json.corrupt").exists()
     # Skills still list (name falls back to the filename), so nothing is bricked.
-    assert "alpha" in {s.id for s in skills_mod._sync_skills()}
+    assert "alpha" in {s.id for s in skills_mod.sync_skills()}
 
 
 def test_non_object_index_is_rejected(skills_dir):
     with open(skills_dir / ".skills_index.json", "w") as f:
         f.write("[1, 2, 3]")
-    assert skills_mod._load_index() == {}
+    assert skills_mod.p_load_index() == {}
 
 
 def test_save_index_is_atomic_no_temp_leftover(skills_dir):
-    skills_mod._save_index({"x": {"name": "X"}})
-    assert skills_mod._load_index() == {"x": {"name": "X"}}
+    skills_mod.p_save_index({"x": {"name": "X"}})
+    assert skills_mod.p_load_index() == {"x": {"name": "X"}}
     leftovers = [n for n in __import__("os").listdir(skills_dir) if n.startswith(".skills_index.") and n.endswith(".tmp")]
     assert leftovers == []
 
 
 def test_flat_skill_still_syncs(skills_dir):
     _write(str(skills_dir / "my-flat.md"), "do the flat thing")
-    skills = {s.id: s for s in skills_mod._sync_skills()}
+    skills = {s.id: s for s in skills_mod.sync_skills()}
     assert "my-flat" in skills
     s = skills["my-flat"]
     assert s.content == "do the flat thing"
@@ -70,7 +70,7 @@ def test_folder_skill_syncs_with_supporting_files(skills_dir):
     base = skills_dir / "remotion"
     _write(str(base / "SKILL.md"), "---\nname: Remotion\ndescription: make videos\n---\nrender stuff")
     _write(str(base / "helper.py"), "print('hi')")
-    skills = {s.id: s for s in skills_mod._sync_skills()}
+    skills = {s.id: s for s in skills_mod.sync_skills()}
     assert "remotion" in skills
     s = skills["remotion"]
     assert "render stuff" in s.content
@@ -84,7 +84,7 @@ def test_folder_skill_syncs_with_supporting_files(skills_dir):
 def test_folder_skill_without_extra_files_flags_false(skills_dir):
     base = skills_dir / "solo"
     _write(str(base / "SKILL.md"), "just one file")
-    s = {x.id: x for x in skills_mod._sync_skills()}["solo"]
+    s = {x.id: x for x in skills_mod.sync_skills()}["solo"]
     assert s.dir_path == str(base)
     assert s.has_supporting_files is False
 
@@ -177,7 +177,7 @@ def test_swarm_import_writes_folder_when_files_present(skills_dir):
     new_id = SkillExportable.import_(payload, {"scripts/go.py": b"print(1)"}, None)
     assert os.path.isfile(skills_dir / new_id / "SKILL.md")
     assert os.path.isfile(skills_dir / new_id / "scripts" / "go.py")
-    synced = {s.id: s for s in skills_mod._sync_skills()}
+    synced = {s.id: s for s in skills_mod.sync_skills()}
     assert synced[new_id].has_supporting_files is True
 
 
@@ -203,7 +203,7 @@ async def test_create_writes_folder_and_supersedes_legacy_flat(skills_dir):
     assert sid == "notes"
     assert os.path.isfile(skills_dir / "notes" / "SKILL.md")
     assert not (skills_dir / "notes.md").exists()
-    only = [s for s in skills_mod._sync_skills() if s.id == "notes"]
+    only = [s for s in skills_mod.sync_skills() if s.id == "notes"]
     assert len(only) == 1 and only[0].content == "new body"
 
 

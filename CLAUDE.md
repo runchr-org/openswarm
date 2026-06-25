@@ -42,6 +42,18 @@ Personal / per-machine notes go in `CLAUDE.local.md` (gitignored), **not** here.
   are dynamic-key maps (a registry keyed by a runtime id) and external protocol shapes (the Claude
   Agent SDK hook returns, `model_dump` output).
 
+## Comments
+- **Every comment is ONE physical line. No exceptions.** Never wrap a comment across multiple `#`
+  lines — collapse it into a single line (long is fine; multi-line is not).
+- **Delete comments that aren't pulling weight.** Keep only the WHY (a non-obvious reason, gotcha, or
+  ambiguity); delete anything that restates the code, and delete dead/commented-out code outright.
+- A module/function docstring is exempt (it's a docstring, not a `#` comment).
+
+## Whitespace
+- **No gratuitous blank lines.** One blank line separates logical units; never stack 2+ blank lines.
+- **Tight imports** — no blank lines inside an import block beyond the single separator between
+  stdlib / third-party / local groups. Delete any blank line that isn't doing real readability work.
+
 When you add or change code, the files you touch must be clean under these rules. Pre-existing debt
 in files you are not otherwise editing is grandfathered via the linter's exception lists — do not
 mass-migrate untouched files.

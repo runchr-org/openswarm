@@ -7,6 +7,9 @@ Python-only rules do not. Specifically:
 - **Single-purpose file naming** — a one-export file is named after its export.
 - **Type everything** under strict `tsconfig`; model data with typed interfaces, not untyped
   objects (the TS equivalent of "no bare dicts").
+- **Comments are ONE line each, no exceptions** (`//` — never stack into a multi-line block); keep
+  only WHY/gotcha, delete restating or dead-code comments. JSDoc blocks are exempt.
+- **No gratuitous blank lines** — never stack 2+ blanks; keep imports tight.
 - **Does not apply (Python-only):** `@typechecked`, pydantic `BaseModel`, the no-relative-imports
   rule (the frontend uses the `@/` path alias and local relative imports), and `p-private`.
 

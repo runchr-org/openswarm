@@ -19,7 +19,7 @@ from backend.apps.agents.manager.session.session_store import (
 )
 from backend.apps.agents.manager.session.sync_session_close import sync_session_close
 from backend.apps.agents.manager.session.apply_context_window import apply_context_window
-from backend.apps.agents.manager.session import lifecycle
+from backend.apps.agents.manager.session import resume_and_duplicate
 from backend.apps.agents.manager.view_builder_state import (
     view_builder_render_retry_counts,
     view_builder_dirty_sessions,
@@ -139,7 +139,7 @@ class SessionLifecycle(AgentManagerProtocol):
     async def resume_session(self, session_id: str) -> AgentSession:
         if session_id in self.sessions:
             return self.sessions[session_id]
-        session = lifecycle.load_session_for_resume(session_id)
+        session = resume_and_duplicate.load_session_for_resume(session_id)
         self.sessions[session_id] = session
         await ws_manager.send_to_session(session_id, "agent:status", {
             "session_id": session_id,
@@ -193,7 +193,7 @@ class SessionLifecycle(AgentManagerProtocol):
 
     @typechecked
     async def duplicate_session(self, session_id: str, dashboard_id: Optional[str] = None, up_to_message_id: Optional[str] = None) -> AgentSession:
-        new_session = lifecycle.build_duplicate_session(self.sessions.get(session_id), session_id, dashboard_id, up_to_message_id)
+        new_session = resume_and_duplicate.build_duplicate_session(self.sessions.get(session_id), session_id, dashboard_id, up_to_message_id)
         self.sessions[new_session.id] = new_session
         await ws_manager.send_to_session(new_session.id, "agent:status", {
             "session_id": new_session.id,

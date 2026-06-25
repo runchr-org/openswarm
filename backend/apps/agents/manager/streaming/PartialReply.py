@@ -7,7 +7,7 @@ from typing import Optional
 from pydantic import BaseModel, ConfigDict
 
 
-class LivePartial(BaseModel):
+class PartialReply(BaseModel):
     model_config = ConfigDict(validate_assignment=True)
 
     msg_id: Optional[str] = None

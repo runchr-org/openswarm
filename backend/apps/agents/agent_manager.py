@@ -18,7 +18,7 @@ from backend.apps.agents.manager.session.session_store import (
     load_session_data as load_session_data,
 )
 from backend.apps.agents.manager.streaming.state import ThinkingState, TurnState
-from backend.apps.agents.manager.streaming.LivePartial import LivePartial
+from backend.apps.agents.manager.streaming.PartialReply import PartialReply
 from backend.apps.agents.manager.session.SessionLifecycle import SessionLifecycle
 from backend.apps.agents.manager.session.SessionPersistence import SessionPersistence
 from backend.apps.agents.manager.Messaging import Messaging
@@ -43,7 +43,7 @@ class AgentManager(SessionLifecycle, SessionPersistence, Messaging, SessionContr
         # Live mirror of the in-flight streamed assistant text per session, so a
         # stop can persist the partial reply instantly instead of waiting out the
         # multi-second SDK teardown the cancel handler sits behind.
-        self.live_partial: Dict[str, LivePartial] = {}
+        self.live_partial: Dict[str, PartialReply] = {}
         # Per-session cancel signal: the loop stashes its asyncio.Event here so a
         # stop/close can set it. Lives on the manager, not the AgentSession model,
         # so it stays out of serialization (an Event can't be model_dump'd).

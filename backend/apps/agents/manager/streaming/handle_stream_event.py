@@ -13,7 +13,7 @@ from typeguard import typechecked
 from backend.apps.agents.core.models import AgentSession
 from backend.apps.agents.core.ws_manager import ws_manager
 from backend.apps.agents.manager.streaming.state import ThinkingState, TurnState
-from backend.apps.agents.manager.streaming.LivePartial import LivePartial
+from backend.apps.agents.manager.streaming.PartialReply import PartialReply
 
 try:
     from claude_agent_sdk.types import StreamEvent
@@ -28,7 +28,7 @@ async def handle_stream_event(
     session_id: str,
     turn: TurnState,
     thinking: ThinkingState,
-    live_partial: Dict[str, LivePartial],
+    live_partial: Dict[str, PartialReply],
 ) -> None:
     event = message.event
     event_type = event.get("type")
@@ -113,7 +113,7 @@ async def handle_stream_event(
             text_chunk = delta.get("text", "")
             turn.assistant_text_chars += len(text_chunk)
             turn.stream_text_accum += text_chunk
-            live_partial[session_id] = LivePartial(
+            live_partial[session_id] = PartialReply(
                 msg_id=turn.stream_text_msg_id,
                 text=turn.stream_text_accum,
                 branch_id=session.active_branch_id,

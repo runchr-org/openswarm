@@ -17,14 +17,14 @@ from typing import TYPE_CHECKING, Any, Dict
 
 if TYPE_CHECKING:
     from backend.apps.agents.core.models import AgentSession
-    from backend.apps.agents.manager.streaming.LivePartial import LivePartial
+    from backend.apps.agents.manager.streaming.PartialReply import PartialReply
 
 
 class AgentManagerProtocol:
     # State set in AgentManager.__init__.
     sessions: Dict[str, AgentSession]
     tasks: Dict[str, asyncio.Task]
-    live_partial: Dict[str, LivePartial]
+    live_partial: Dict[str, PartialReply]
     cancel_events: Dict[str, asyncio.Event]
 
     if TYPE_CHECKING:

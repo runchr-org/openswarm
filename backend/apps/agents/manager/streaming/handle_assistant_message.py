@@ -14,7 +14,7 @@ from backend.apps.agents.core.models import AgentSession, Message
 from backend.apps.agents.core.ws_manager import ws_manager
 from backend.apps.agents.manager.streaming.state import ThinkingState, TurnState
 from backend.apps.agents.manager.streaming.upsert_message import upsert_message
-from backend.apps.agents.manager.streaming.LivePartial import LivePartial
+from backend.apps.agents.manager.streaming.PartialReply import PartialReply
 from backend.apps.agents.manager.streaming import thinking as thinking_mod
 
 try:
@@ -31,7 +31,7 @@ async def handle_assistant_message(
     session_id: str,
     turn: TurnState,
     thinking: ThinkingState,
-    live_partial: Dict[str, LivePartial],
+    live_partial: Dict[str, PartialReply],
     sessions: Dict[str, AgentSession],
 ) -> None:
     content_parts = []

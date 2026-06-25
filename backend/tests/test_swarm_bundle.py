@@ -166,6 +166,7 @@ def test_workflow_round_trips_through_the_store(isolated_workflows_data):
     # from before the workflow store was on eric/dev.
     from backend.apps.swarm.entities.workflows import WorkflowExportable
     from backend.apps.swarm.exportable import RemapTable
+    from backend.apps.workflows import storage
     assert WorkflowExportable.load("nonexistent") is None
     new_id = WorkflowExportable.import_(
         {"title": "Shared WF", "schedule": {"enabled": True}}, {}, RemapTable()
@@ -174,7 +175,10 @@ def test_workflow_round_trips_through_the_store(isolated_workflows_data):
     loaded = WorkflowExportable.load(new_id)
     assert loaded is not None
     assert loaded.name == "Shared WF"
-    assert loaded.p_data["schedule"]["enabled"] is False
+    # Read the persisted row back through the store's public API (not the entity's
+    # private data) to confirm the schedule was forced off on import.
+    saved = storage.get_workflow(new_id)
+    assert saved is not None and saved.schedule.enabled is False
 
 
 def test_session_export_carries_transcript_drops_runtime_and_secrets():

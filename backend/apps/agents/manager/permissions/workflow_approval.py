@@ -10,6 +10,7 @@ agent_manager re-exports the setters for the executor's convenience.
 import logging
 from typing import Callable, Dict, Optional
 
+from pydantic import BaseModel, ConfigDict
 from typeguard import typechecked
 
 from backend.apps.agents.manager.permissions.ApprovalDecision import ApprovalDecision
@@ -19,23 +20,18 @@ from backend.apps.agents.manager.streaming.HookContext import HookContext
 logger = logging.getLogger(__name__)
 
 
-class WorkflowApprovalMemory:
+class WorkflowApprovalMemory(BaseModel):
     """A workflow run's approval context, pushed in by the executor."""
 
-    def __init__(
-        self,
-        decisions: Dict[str, str],
-        step_usage: Dict[str, Dict[str, bool]],
-        remember: Optional[Callable[[str, str], None]],
-        ask_timeout: float,
-    ) -> None:
-        self.decisions = decisions          # workflow-level: tool -> "allow"/"deny"
-        self.step_usage = step_usage        # per-step record: step_id -> {tool: approved}
-        self.remember = remember            # persist a workflow-level decision to disk
-        self.ask_timeout = ask_timeout
-        # The executor bumps this as it advances steps so the gate can record
-        # which tools each step touched. None on test runs that don't thread it.
-        self.current_step_id: Optional[str] = None
+    model_config = ConfigDict(validate_assignment=True)
+
+    decisions: Dict[str, str]                       # workflow-level: tool -> "allow"/"deny"
+    step_usage: Dict[str, Dict[str, bool]]          # per-step record: step_id -> {tool: approved}
+    remember: Optional[Callable[[str, str], None]]  # persist a workflow-level decision to disk
+    ask_timeout: float
+    # The executor bumps this as it advances steps so the gate can record which
+    # tools each step touched. None on test runs that don't thread it.
+    current_step_id: Optional[str] = None
 
 
 p_approval_memory: Dict[str, WorkflowApprovalMemory] = {}
@@ -51,7 +47,7 @@ def set_workflow_approval_memory(
     ask_timeout: float,
 ) -> None:
     p_approval_memory[session_id] = WorkflowApprovalMemory(
-        decisions, step_usage, remember, ask_timeout
+        decisions=decisions, step_usage=step_usage, remember=remember, ask_timeout=ask_timeout
     )
 
 
@@ -74,14 +70,14 @@ def get_workflow_step_usage(session_id: str) -> Dict[str, Dict[str, bool]]:
 
 
 @typechecked
-def p_is_claude_schedule_skill(tool_name: str, tool_input: object) -> bool:
+def is_claude_schedule_skill(tool_name: str, tool_input: object) -> bool:
     if tool_name != "Skill" or not isinstance(tool_input, dict):
         return False
     return str(tool_input.get("skill") or "").strip().lower() == "schedule"
 
 
 @typechecked
-def p_note_tool_used(session_id: str, tool_name: str, approved: bool) -> None:
+def note_tool_used(session_id: str, tool_name: str, approved: bool) -> None:
     # Record which tools each step touched (in-memory; the executor/test path
     # persists step_usage once at run end). Captures every tool the gate sees so
     # a step's tool set is complete, not only the ones that prompted.
@@ -91,7 +87,8 @@ def p_note_tool_used(session_id: str, tool_name: str, approved: bool) -> None:
     mem.step_usage.setdefault(mem.current_step_id, {})[tool_name] = approved
 
 
-async def p_resolve_ask(
+@typechecked
+async def resolve_ask(
     ctx: HookContext, tool_name: str, tool_input: object, sensitive_pattern: Optional[str]
 ) -> ApprovalDecision:
     """Resolve an 'ask' policy. On a workflow run, reuse a remembered decision
@@ -114,10 +111,10 @@ async def p_resolve_ask(
             return ApprovalDecision(behavior="deny", message="Denied by a remembered workflow permission")
         prior = mem.decisions.get(tool_name)
         if prior == "allow":
-            p_note_tool_used(ctx.session_id, tool_name, True)
+            note_tool_used(ctx.session_id, tool_name, True)
             return ApprovalDecision(behavior="allow")
         if prior == "deny":
-            p_note_tool_used(ctx.session_id, tool_name, False)
+            note_tool_used(ctx.session_id, tool_name, False)
             return ApprovalDecision(behavior="deny", message="Denied by a remembered workflow permission")
     timeout = mem.ask_timeout if mem is not None else 600.0
     decision = await request_user_approval(
@@ -127,7 +124,7 @@ async def p_resolve_ask(
     if rememberable and decision.behavior in ("allow", "deny"):
         behavior = decision.behavior
         mem.decisions[tool_name] = behavior
-        p_note_tool_used(ctx.session_id, tool_name, behavior == "allow")
+        note_tool_used(ctx.session_id, tool_name, behavior == "allow")
         if mem.remember:
             try:
                 mem.remember(tool_name, behavior)

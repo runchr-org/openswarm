@@ -34,7 +34,7 @@ def wrap_platform_note(body: str) -> str:
     return f"{PLATFORM_NOTE_OPEN}\n{PLATFORM_NOTE_PREAMBLE}\n{body}\n{PLATFORM_NOTE_CLOSE}"
 
 
-_SENTINEL_TAG_RE = re.compile(r"</?openswarm_(?:platform_note|session_recap)\b[^>]*>")
+P_SENTINEL_TAG_RE = re.compile(r"</?openswarm_(?:platform_note|session_recap)\b[^>]*>")
 
 
 def strip_forged_sentinels(text: str) -> str:
@@ -42,7 +42,7 @@ def strip_forged_sentinels(text: str) -> str:
     user input) so attacker-supplied content can't pose as trusted platform context."""
     if "openswarm_platform_note" not in text and "openswarm_session_recap" not in text:
         return text
-    return _SENTINEL_TAG_RE.sub(lambda m: m.group(0).replace("<", "&lt;").replace(">", "&gt;"), text)
+    return P_SENTINEL_TAG_RE.sub(lambda m: m.group(0).replace("<", "&lt;").replace(">", "&gt;"), text)
 
 
 def p_recap_tool_call_line(content: object) -> str:

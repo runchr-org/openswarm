@@ -101,7 +101,7 @@ def build_effective_tool_lists(
                 effective_disallowed.append(wt_name)
     # Claude's internal Cron* scheduler is denied in favour of the visible native
     # one; withhold it from the SDK so the model doesn't even reach for it.
-    for bt in path_gate.p_CLAUDE_INTERNAL_SCHEDULER_TOOLS:
+    for bt in path_gate.CLAUDE_INTERNAL_SCHEDULER_TOOLS:
         if bt not in effective_disallowed:
             effective_disallowed.append(bt)
     return effective_allowed, effective_disallowed

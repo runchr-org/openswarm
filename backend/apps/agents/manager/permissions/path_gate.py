@@ -170,7 +170,7 @@ p_SCHEDULE_GATED = {
     "mcp__openswarm-schedule__DeleteScheduledWorkflow",
     "mcp__openswarm-schedule__PauseAllWorkflows",
 }
-p_CLAUDE_INTERNAL_SCHEDULER_TOOLS = ("CronCreate", "CronList", "CronDelete")
+CLAUDE_INTERNAL_SCHEDULER_TOOLS = ("CronCreate", "CronList", "CronDelete")
 
 
 @typechecked
@@ -182,7 +182,7 @@ def maybe_override_policy(policy: str, tool_name: str, tool_input: object) -> Tu
     future writes to it pass through silently."""
     if tool_name == "Bash" and looks_like_os_scheduling(tool_input):
         return "ask", None
-    if tool_name in p_CLAUDE_INTERNAL_SCHEDULER_TOOLS:
+    if tool_name in CLAUDE_INTERNAL_SCHEDULER_TOOLS:
         return "deny", None
     # Committing or mutating a native recurring schedule is the in-app twin of the
     # crontab gate above: real, user-visible, hard-to-undo, so it goes through

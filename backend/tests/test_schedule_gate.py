@@ -5,7 +5,7 @@ the scheduled-tasks PR shipped without a test, and the exact path most at risk i
 agent-manager decomposition (the gating moved from agent_manager into path_gate)."""
 
 from backend.apps.agents.manager.permissions import path_gate
-from backend.apps.agents.manager.permissions.workflow_approval import p_is_claude_schedule_skill
+from backend.apps.agents.manager.permissions.workflow_approval import is_claude_schedule_skill
 
 
 def test_schedule_commit_tools_force_ask_even_when_always_allow():
@@ -26,11 +26,11 @@ def test_claude_internal_cron_tools_denied():
 
 
 def test_claude_schedule_skill_detected():
-    assert p_is_claude_schedule_skill("Skill", {"skill": "schedule"})
-    assert p_is_claude_schedule_skill("Skill", {"skill": "Schedule"})
-    assert not p_is_claude_schedule_skill("Skill", {"skill": "other"})
-    assert not p_is_claude_schedule_skill("Bash", {"skill": "schedule"})
-    assert not p_is_claude_schedule_skill("Skill", "not a dict")
+    assert is_claude_schedule_skill("Skill", {"skill": "schedule"})
+    assert is_claude_schedule_skill("Skill", {"skill": "Schedule"})
+    assert not is_claude_schedule_skill("Skill", {"skill": "other"})
+    assert not is_claude_schedule_skill("Bash", {"skill": "schedule"})
+    assert not is_claude_schedule_skill("Skill", "not a dict")
 
 
 def test_normal_tool_unaffected_by_schedule_gate():

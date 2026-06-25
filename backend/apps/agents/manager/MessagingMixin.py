@@ -21,7 +21,10 @@ from backend.apps.agents.manager.prompt.prompt_context import resolve_mode
 logger = logging.getLogger(__name__)
 
 
-class MessagingMixin:
+from backend.apps.agents.manager.AgentManagerState import AgentManagerState
+
+
+class MessagingMixin(AgentManagerState):
     @typechecked
     async def send_message(
         self,

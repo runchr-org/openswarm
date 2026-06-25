@@ -33,11 +33,12 @@ from backend.apps.tools_lib.tools_lib import (
     refresh_google_token,
     refresh_hubspot_token,
 )
+from backend.apps.agents.manager.AgentManagerState import AgentManagerState
 
 logger = logging.getLogger(__name__)
 
 
-class RunSupportMixin:
+class RunSupportMixin(AgentManagerState):
     @typechecked
     async def build_mcp_servers(
         self,

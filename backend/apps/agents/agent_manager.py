@@ -215,7 +215,8 @@ class AgentManager(SessionLifecycleMixin, SessionPersistenceMixin, MessagingMixi
                 # the row's name is still the default placeholder.
                 if session.mode == "view-builder":
                     try:
-                        from backend.apps.outputs.outputs import sync_output_from_meta_json, _load_all as load_outputs
+                        from backend.apps.outputs.outputs import sync_output_from_meta_json
+                        from backend.apps.outputs.workspace_io import load_all as load_outputs
                         if sync_output_from_meta_json(session_id, fallback_name=session.name):
                             # Broadcast the renamed row so the sidebar
                             # flips from "Untitled App" to the real name

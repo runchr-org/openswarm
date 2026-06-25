@@ -14,7 +14,7 @@
   "extraPaths": ["../.."],
   "reportMissingTypeStubs": false,
   "typeCheckingMode": "off",
-  "reportAttributeAccessIssue": "none",
+  "reportAttributeAccessIssue": "error",
   "reportUndefinedVariable": "error",
   "reportMissingImports": "error"
 }

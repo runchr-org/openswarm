@@ -187,7 +187,7 @@ async def generate_group_meta(
     if not session:
         raise ValueError(f"Session {session_id} not found")
 
-    fallback_name = tool_calls[0].get("tool", "Tool calls") if tool_calls else "Tool calls"
+    fallback_name = str(tool_calls[0].get("tool", "Tool calls")) if tool_calls else "Tool calls"
     fallback_name = fallback_name.split("__")[-1].replace("_", " ").title() if "__" in fallback_name else fallback_name
 
     name = fallback_name

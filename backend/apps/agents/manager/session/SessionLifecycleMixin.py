@@ -28,7 +28,10 @@ from backend.apps.agents.manager.view_builder_state import (
 logger = logging.getLogger(__name__)
 
 
-class SessionLifecycleMixin:
+from backend.apps.agents.manager.AgentManagerState import AgentManagerState
+
+
+class SessionLifecycleMixin(AgentManagerState):
     @staticmethod
     @typechecked
     def build_search_text(session: AgentSession, max_len: int = 5000) -> str:

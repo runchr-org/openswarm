@@ -19,7 +19,10 @@ from backend.apps.agents.manager.session.apply_context_window import apply_conte
 logger = logging.getLogger(__name__)
 
 
-class SessionPersistenceMixin:
+from backend.apps.agents.manager.AgentManagerState import AgentManagerState
+
+
+class SessionPersistenceMixin(AgentManagerState):
     @typechecked
     async def reconcile_on_startup(self) -> None:
         """Mark any stale running sessions as stopped."""

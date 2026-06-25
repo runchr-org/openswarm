@@ -10,6 +10,7 @@ from typing import Dict, List, Optional
 from typeguard import typechecked
 
 from backend.apps.agents.core.models import AgentSession
+from backend.apps.settings.models import AppSettings
 from backend.auth import get_auth_token
 
 logger = __import__("logging").getLogger(__name__)
@@ -21,7 +22,7 @@ async def configure_provider_env(
     session: AgentSession,
     resolved_model: object,
     api_type: Optional[str],
-    global_settings: object,
+    global_settings: AppSettings,
     sub_conns: List,
 ) -> None:
     from backend.apps.nine_router import is_running as nine_router_running

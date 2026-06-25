@@ -29,7 +29,10 @@ from backend.apps.agents.manager.prompt.prompt_context import resolve_mode
 logger = logging.getLogger(__name__)
 
 
-class AgentLaunchMixin:
+from backend.apps.agents.manager.AgentManagerState import AgentManagerState
+
+
+class AgentLaunchMixin(AgentManagerState):
     @typechecked
     async def launch_agent(self, config: AgentConfig) -> AgentSession:
         session_id = uuid4().hex
@@ -78,8 +81,8 @@ class AgentLaunchMixin:
             try:
                 from backend.apps.outputs.outputs import (
                     ensure_webapp_workspace_seeded_and_registered,
-                    _load as load_output,
                 )
+                from backend.apps.outputs.workspace_io import load as load_output
                 output_id = ensure_webapp_workspace_seeded_and_registered(
                     workspace_id=session_id,
                     folder=effective_cwd,

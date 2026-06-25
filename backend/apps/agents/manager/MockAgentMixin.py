@@ -17,7 +17,10 @@ from backend.apps.agents.core.ws_manager import ws_manager
 logger = logging.getLogger(__name__)
 
 
-class MockAgentMixin:
+from backend.apps.agents.manager.AgentManagerState import AgentManagerState
+
+
+class MockAgentMixin(AgentManagerState):
     @typechecked
     async def run_mock_agent(self, session_id: str, prompt: str):
         """Mock agent loop for development without claude_agent_sdk installed."""

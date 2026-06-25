@@ -15,7 +15,10 @@ from backend.apps.agents.manager.session.session_store import save_session
 logger = logging.getLogger(__name__)
 
 
-class SessionControlMixin:
+from backend.apps.agents.manager.AgentManagerState import AgentManagerState
+
+
+class SessionControlMixin(AgentManagerState):
     @typechecked
     async def stop_agent(self, session_id: str):
         """Stop a running agent and all its browser-agent children."""

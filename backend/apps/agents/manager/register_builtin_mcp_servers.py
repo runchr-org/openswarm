@@ -103,4 +103,20 @@ def register_builtin_mcp_servers(
         },
         "type": "stdio",
     }
+
+    # Always-on schedule server: ScheduleWorkflow + CRUD + AddWorkflowStep/EditWorkflowStep so the agent (and the workflow Edit Agent) can build and schedule recurring work via the native scheduler instead of cron/launchctl. The 4 scheduling tools are force-gated in path_gate; Cron* is denied in build_effective_tool_lists.
+    schedule_server_path = os.path.join(
+        agents_dir, "schedule_mcp_server.py"
+    )
+    mcp_servers["openswarm-schedule"] = {
+        "command": sys.executable,
+        "args": [schedule_server_path],
+        "env": {
+            "OPENSWARM_PORT": os.environ.get("OPENSWARM_PORT", "8324"),
+            "OPENSWARM_AUTH_TOKEN": get_auth_token(),
+            "OPENSWARM_PARENT_SESSION_ID": session.id,
+            "OPENSWARM_DASHBOARD_ID": session.dashboard_id or "",
+        },
+        "type": "stdio",
+    }
     return browser_delegation_tools, invoke_agent_tools

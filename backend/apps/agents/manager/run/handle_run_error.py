@@ -15,6 +15,8 @@ from backend.apps.agents.core.error_classify import (
     is_long_context_error,
     is_transient_capacity_error,
     is_free_trial_exhausted,
+    is_out_of_tokens,
+    extract_reset_hint,
     is_auth_error,
     is_unknown_model_error,
     parse_retry_after,
@@ -139,6 +141,31 @@ async def handle_run_error(e: Exception, session: AgentSession, session_id: str,
         await ws_manager.send_to_session(session_id, "agent:free_trial_exhausted", {
             "session_id": session_id,
             "message": friendly_msg,
+        })
+        await ws_manager.send_to_session(session_id, "agent:message", {
+            "session_id": session_id,
+            "message": error_msg.model_dump(mode="json"),
+        })
+    elif is_out_of_tokens(e, extra_text=p_stderr_tail):
+        # The user's PROVIDER account is out of credits / over quota, distinct from
+        # OpenSwarm free-trial exhaustion above and from a 401 below ("credit balance
+        # too low", "insufficient_quota", "usage cap exceeded", OpenSwarm plan limit).
+        # Show a friendly card with the provider's reset hint when it gave one, instead
+        # of dropping to the raw-error blob in the else branch.
+        p_reset_hint = extract_reset_hint(f"{e!s}\n{p_stderr_tail}")
+        friendly_msg = (
+            "Your model provider reports you're out of credits or over your usage "
+            "limit" + (f" (resets {p_reset_hint})" if p_reset_hint else "") + ". Add "
+            "credits with your provider, switch to a different model, or connect "
+            "another option in Settings → Models."
+        )
+        error_msg = Message(role="system", content=friendly_msg, branch_id=session.active_branch_id)
+        session.messages.append(error_msg)
+        await ws_manager.send_to_session(session_id, "agent:out_of_credits", {
+            "session_id": session_id,
+            "message": friendly_msg,
+            "reset_hint": p_reset_hint,
+            "model": session.model,
         })
         await ws_manager.send_to_session(session_id, "agent:message", {
             "session_id": session_id,
